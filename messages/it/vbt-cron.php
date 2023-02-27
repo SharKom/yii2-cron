@@ -18,6 +18,8 @@
  */
 return [
     'Active' => 'Attivo',
+    'Execute' => 'Esegui',
+    'Execution success' => 'Cronjob Eseguito: Verifica i file di log per verificare l\'esito di esecuzione',
     'Command' => 'Comando',
     'Create Cron Job' => 'Crea una schedulazione',
     'Cron Job Runs' => 'Lista esecuzioni',

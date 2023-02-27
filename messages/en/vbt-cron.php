@@ -18,6 +18,8 @@
  */
 return [
     'Active' => 'Active',
+    'Execute' => 'Execute',
+    'Execution success' => 'Execution done: verify the logs to know the execution status',
     'Command' => 'Command',
     'Create Cron Job' => 'Create cron job',
     'Cron Job Runs' => 'Cron job runs',

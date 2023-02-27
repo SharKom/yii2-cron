@@ -65,6 +65,8 @@ class CronController extends Controller
                 $this->run('/cron/job/run', [$job->id]);
             }
         }
+
+        $this->purgeLogs();
     }
 
     private function unlock() {
@@ -75,5 +77,18 @@ class CronController extends Controller
             $result=$conn->createCommand("update cron_job set last_id=null where id=$job[job_id]")->execute();
             $result=$conn->createCommand("delete from cron_job_run where id=$job[id]")->execute();
         }
+    }
+
+    private function purgeLogs(){
+        $conn=Yii::$app->db;
+        $module = Yii::$app->getModule(Yii::$app->controller->module->id);
+
+        if(isset($module->params["purge_log_interval"])) {
+            $months=$module->params["purge_log_interval"];
+        } else {
+            $months=3;
+        }
+
+        $conn->createCommand("delete from cron_job_run where start<(NOW() - INTERVAL $months MONTH)")->execute();
     }
 }

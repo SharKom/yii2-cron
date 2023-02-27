@@ -72,11 +72,25 @@ $this->params['breadcrumbs'][] = $this->title;
                 ],
                 [
                     'class' => 'kartik\grid\ActionColumn',
-                    'template' => '{update} {delete} {run}',
+                    'template' => '{update} {delete} {logs} {run}',
                     'buttons' => [
-                        'run' => function ($url, CronJob $model) {
+                        'logs' => function ($url, CronJob $model) {
                             return Html::a('<i class="glyphicon glyphicon-list"></i>', ['/cron/cron-job-run/index', 'CronJobRunSearch' => ['job_id' => $model->id]], [
                                 'title' => Yii::t('vbt-cron', 'Logs'),
+                                'data-pjax' => 0,
+                            ]);
+                        },
+                    ]
+                ],
+                [
+                    'class' => 'kartik\grid\ActionColumn',
+                    "header"=>Yii::t('vbt-cron', 'Execute'),
+                    'template' => '{run}',
+                    'buttons' => [
+
+                        'run' => function ($url, CronJob $model) {
+                            return Html::a('<i class="glyphicon glyphicon-play"></i>', ['run', 'id' => $model->id], [
+                                'title' => Yii::t('vbt-cron', 'Execute'),
                                 'data-pjax' => 0,
                             ]);
                         },

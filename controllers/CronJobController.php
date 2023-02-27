@@ -103,6 +103,16 @@ class CronJobController extends Controller
         return $this->redirect(['index']);
     }
 
+    public function actionRun($id) {
+        $model = $this->findModel($id);
+        $model->run();
+        Yii::$app->session->setFlash(
+            'success',
+            Yii::t("vbt-cron", "Execution success")
+        );
+        return $this->redirect(['index']);
+    }
+
     /**
      * Finds the CronJob model based on its primary key value.
      * If the model is not found, a 404 HTTP exception will be thrown.

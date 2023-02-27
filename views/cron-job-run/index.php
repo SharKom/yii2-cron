@@ -77,8 +77,9 @@ $this->params['breadcrumbs'][] = $this->title;
                     'class' => '\kartik\grid\DataColumn',
                     'attribute' => 'output',
                     'value' => function (CronJobRun $model) {
-                        return Html::tag('pre', Console::ansiToHtml($model->output), ['style' => 'padding:15px; background-color:black; color:white;']);
+                        return Html::tag('pre', Console::ansiToHtml($model->output), ['style' => 'width:100%; padding:15px; background-color:black; color:white; white-space: pre-wrap; white-space: -moz-pre-wrap; white-space: -pre-wrap; white-space: -o-pre-wrap; word-wrap: break-word;']);
                     },
+                    'contentOptions'=>["style"=>"width:35%; vertical-align: top !important;"],
                     'format' => 'raw',
                     'hAlign' => 'left',
                     'vAlign' => 'middle',
@@ -87,8 +88,9 @@ $this->params['breadcrumbs'][] = $this->title;
                     'class' => '\kartik\grid\DataColumn',
                     'attribute' => 'error_output',
                     'value' => function (CronJobRun $model) {
-                        return Html::tag('pre', Console::ansiToHtml($model->error_output), ['style' => 'padding:15px']);
+                        return Html::tag('pre', Console::ansiToHtml($model->error_output), ['style' => 'width:100%; padding:15px; background-color:black; color:white;  white-space: pre-wrap; white-space: -moz-pre-wrap; white-space: -pre-wrap; white-space: -o-pre-wrap; word-wrap: break-word;']);
                     },
+                    'contentOptions'=>["style"=>"width:35%; vertical-align: top !important;"],
                     'format' => 'raw',
                     'hAlign' => 'left',
                     'vAlign' => 'middle',

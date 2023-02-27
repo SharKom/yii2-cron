@@ -18,6 +18,8 @@
  */
 return [
     'Active' => 'Aktív',
+    'Execute' => 'Végrehajtás',
+    'Execution success' => 'Végrehajtás megtörtént: ellenőrizze a naplókat a végrehajtás állapotának megismeréséhez.',
     'Command' => 'Parancs',
     'Create Cron Job' => 'Cron feladat létrehozása',
     'Cron Job Runs' => 'Cron feladat futások',

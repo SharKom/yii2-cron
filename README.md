@@ -8,6 +8,13 @@ Forked from vasadibt/yii2-cron with some modifications:
 2. Added capability to have a log file in addition to DB logs
 3. Removed the runquick capabilities
 
+
+ChangeLog 27/Feb/2023
+1. Add Manual Run button on cronjob page
+2. Add auto purge logs (use module param purge_log_interval | default 3 months)
+3. Fix some graphics in logs pages
+
+
 Installation
 ------------
 
