@@ -65,7 +65,12 @@ $this->params['breadcrumbs'][] = $this->title;
                         if ($job->last_id === null) {
                             return null;
                         }
-                        return $job->last->exit_code == 0 ? true : false;
+                        if(isset($job->last->exit_code)) {
+                            return $job->last->exit_code == 0 ? true : false;
+                        } else {
+                            return false;
+                        }
+
                     },
                     'label' => Yii::t('vbt-cron', 'Success'),
                     'format' => 'boolean',

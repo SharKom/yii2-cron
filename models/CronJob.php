@@ -116,6 +116,9 @@ class CronJob extends ActiveRecord
      */
     public function run()
     {
+        $moduleID = $moduleID ?? Yii::$app->controller->module->id;
+        $module = Yii::$app->getModule($moduleID);
+
         $process = $this->buildProcess($this->command, $this->max_execution_time ?? 60);
         $process->start();
 
@@ -138,8 +141,38 @@ class CronJob extends ActiveRecord
         $run->in_progress = false;
         $run->save(true);
 
+        if ($run->exit_code != 0) {
+            if($module->params["sendNotifications"]===true) {
+                $this->sendErrorEmail($this->command, $run->error_output, $run->output);
+            }
+
+            if ($module->has('customNotification')) {
+                $notificationComponent = $module->get('customNotification');
+                $title="Errore esecuzione cronjob $this->command";
+                $description="Si è presentato un errore durante l'esecuzione del cronjob $this->command il ".date("d/m/Y")." alle ".date("H:i:s");
+
+                $notificationComponent->send($title, $description, "cron-jobs", "error");
+            } else {
+                // Gestisci l'errore in un altro modo o ignoralo se il componente non è impostato
+                // Ad esempio, puoi scrivere un messaggio nel log dell'applicazione
+                //Yii::warning('Il componente di notifica personalizzato non è impostato nel modulo corrente.');
+            }
+        }
+
         return $run;
     }
+
+
+    private function sendErrorEmail($command, $errorOutput, $executionOutput)
+    {
+        Yii::$app->mailer->compose()
+            ->setTo(Yii::$app->params["NotificationsEmail"])
+            ->setFrom([Yii::$app->params['senderEmail'] => Yii::$app->name])
+            ->setSubject('Errore di esecuzione del Cron Job '.$command)
+            ->setTextBody("Si è verificato un errore durante l'esecuzione del comando: $command\n\nDettagli dell'errore:\n$errorOutput\n\nLog di esecuzione:\n$executionOutput")
+            ->send();
+    }
+
 
     /**
      * @param string $command
