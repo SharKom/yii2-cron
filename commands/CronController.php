@@ -14,6 +14,7 @@ use sharkom\cron\models\CronJob;
 use yii\console\Controller;
 use yii\console\widgets\Table;
 use yii\helpers\ArrayHelper;
+use yii\helpers\Console;
 use Yii;
 
 date_default_timezone_set("europe/rome");
@@ -64,7 +65,9 @@ class CronController extends Controller
         $this->unlock();
 
         foreach (CronJob::findRunnable() as $job) {
+
             if (CronExpression::factory($job->schedule)->isDue()) {
+                echo "[" . date('Y-m-d H:i:s') . "] ". Console::ansiFormat("[info]", [Console::FG_GREEN]) . " - ".$job->id." - ".$job->name." - isDue". PHP_EOL;
                 $this->run('/cron/job/run', [$job->id]);
             }
         }
@@ -112,7 +115,7 @@ class CronController extends Controller
 
         if (!empty($cronJobData)) {
 
-             if($module->params["sendNotifications"]===true) {
+            if($module->params["sendNotifications"]===true) {
                 $this->sendUlockNotify($cronJobData);
             }
 
@@ -122,18 +125,18 @@ class CronController extends Controller
         //Qui mandare una mail di notifica
     }
     private function sendUlockNotify($cronJobData){
-            $subject = 'Notifica sblocco CronJob';
+        $subject = 'Notifica sblocco CronJob';
 
-            $body = 'I seguenti cronjob sono stati sbloccati:'  . "\n";
-            foreach ($cronJobData as $jobData) {
-                $body .= 'CronJob: ' . $jobData['name'] . ', Inzio: ' . $jobData['start'] . ', Fine: ' . $jobData['finish'] . ', Tempo di esecuzione: ' . $jobData['runtime'] . ' secondi' . ', Output errore: ' . $jobData['error_output'] .  "\n" ;
-            }
-            Yii::$app->mailer->compose()
-                ->setTo(Yii::$app->params["NotificationsEmail"])
-                ->setFrom([Yii::$app->params['senderEmail'] => Yii::$app->name])
-                ->setSubject($subject)
-                ->setTextBody($body)
-                ->send();
+        $body = 'I seguenti cronjob sono stati sbloccati:'  . "\n";
+        foreach ($cronJobData as $jobData) {
+            $body .= 'CronJob: ' . $jobData['name'] . ', Inzio: ' . $jobData['start'] . ', Fine: ' . $jobData['finish'] . ', Tempo di esecuzione: ' . $jobData['runtime'] . ' secondi' . ', Output errore: ' . $jobData['error_output'] .  "\n" ;
+        }
+        Yii::$app->mailer->compose()
+            ->setTo(Yii::$app->params["NotificationsEmail"])
+            ->setFrom([Yii::$app->params['senderEmail'] => Yii::$app->name])
+            ->setSubject($subject)
+            ->setTextBody($body)
+            ->send();
     }
 
     private function purgeLogs(){

@@ -21,9 +21,12 @@ class JobController extends Controller
         $job = CronJob::findOne($id);
         $run = $job->run();
 
-        Console::output('Process is finished, exit code: #' . $run->exit_code);
-        Console::output($run->output);
-        Console::output($job->logfile);
+        echo "[" . date('Y-m-d H:i:s') . "] ". Console::ansiFormat("[info]", [Console::FG_GREEN]) . " - Process with id $id is finished, exit code: #" . $run->exit_code. PHP_EOL;
+        if($job->logfile!="") {
+            echo "[" . date('Y-m-d H:i:s') . "] ". Console::ansiFormat("[info]", [Console::FG_GREEN]) . " - Log file: " . $job->logfile. PHP_EOL;
+        }
+
+        //Console::output($run->output);
 
         if($job->logfile!="") {
             error_log($run->output, 3, $job->logfile);

@@ -6,6 +6,7 @@
 namespace sharkom\cron\models;
 
 use common\helpers\FileHelper;
+use sharkom\devhelper\LogHelper;
 use Symfony\Component\Process\Process;
 use sharkom\cron\Module;
 use Yii;
@@ -116,6 +117,7 @@ class CronJob extends ActiveRecord
      */
     public function run()
     {
+        LogHelper::log("info", "CronJob::run()");
         $moduleID = $moduleID ?? Yii::$app->controller->module->id;
         $module = Yii::$app->getModule($moduleID);
 
@@ -160,6 +162,7 @@ class CronJob extends ActiveRecord
         }
 
         return $run;
+        LogHelper::log("info", "CronJob::run() - END");
     }
 
 
