@@ -26,16 +26,6 @@ class TestController extends Controller
         }
 
     }
-
-    public function actionGenerateImage($prompt) {
-        if($prompt=="") die("Inserisci un prompt");
-        $apiKey = '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'; // Inserisci la tua chiave API OpenAI
-        $dallE = new DallEHelper($apiKey);
-
-        // Crea un'immagine
-        $generatedImages = $dallE->createImage($prompt, 1, '1024x1024', 'url');
-        print_r($generatedImages);
-
-    }
+    
 
 }
