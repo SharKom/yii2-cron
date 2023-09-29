@@ -153,7 +153,7 @@ class CronJob extends ActiveRecord
                 $title="Errore esecuzione cronjob $this->command";
                 $description="Si è presentato un errore durante l'esecuzione del cronjob $this->command il ".date("d/m/Y")." alle ".date("H:i:s");
 
-                $notificationComponent->send($title, $description, "cron-jobs", "error");
+                $notificationComponent->send($title, $description, "cron-jobs", "error", "$this->command \n\n$run->error_output \n\n$run->output");
             } else {
                 // Gestisci l'errore in un altro modo o ignoralo se il componente non è impostato
                 // Ad esempio, puoi scrivere un messaggio nel log dell'applicazione

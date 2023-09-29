@@ -103,7 +103,7 @@ class CronController extends Controller
                 $notificationComponent = $module->get('customNotification');
                 $title="Notifica sblocco CronJob $cronJobName";
                 $description= 'CronJob: ' . $cronJobName . ', Inzio: ' . $job['start'] . ', Fine: ' . $job['finish'] . ', Tempo di esecuzione: ' . $job['runtime'] . ' secondi' .  "\n" ;
-                $notificationComponent->send($title, $description, "cron-jobs", "error");
+                $notificationComponent->send($title, $description, "cron-jobs", "error", $job['error_output']);
                 sleep(1);
             } else {
                 // Gestisci l'errore in un altro modo o ignoralo se il componente non è impostato
