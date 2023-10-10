@@ -21,7 +21,7 @@
     "symfony/process": "^5.0",
     "dragonmantank/cron-expression": "^1.2",
     "kartik-v/yii2-grid": "@dev",
-    "sharkom/yii2-cronjob-widget": "dev-master"
+    "sharkom/yii2-cronjob-widget": "^1"
   },
   "autoload": {
     "psr-4": {
