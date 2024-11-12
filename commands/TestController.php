@@ -2,6 +2,7 @@
 
 namespace sharkom\cron\commands;
 
+use sharkom\devhelper\LogHelper;
 use Cron\CronExpression;
 use sharkom\cron\models\CronJob;
 use yii\console\Controller;
@@ -14,6 +15,13 @@ use Yii;
 class TestController extends Controller
 {
     public function actionIndex(){
+        $n=180;
+        while ($n) {
+            LogHelper::log("info", "Questo è un log di test");
+            sleep(1);
+        }
+
+        LogHelper::log("error", "Questo è un log di test");
         throw new \Exception("Errore di esecuzione");
     }
 

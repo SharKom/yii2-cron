@@ -77,11 +77,17 @@ $this->params['breadcrumbs'][] = $this->title;
                 ],
                 [
                     'class' => 'kartik\grid\ActionColumn',
-                    'template' => '{update} {delete} {logs} {run}',
+                    'template' => '{update} {delete} {logs} {running} {run}',
                     'buttons' => [
                         'logs' => function ($url, CronJob $model) {
-                            return Html::a('<i class="glyphicon glyphicon-list"></i>', ['/cron/cron-job-run/index', 'CronJobRunSearch' => ['job_id' => $model->id]], [
+                            return Html::a('<i class="glyphicon glyphicon-list"></i>', ['/cron/commands-spool/index', 'CommandsSpoolSearch' => ['history' => 1, "provenience"=>"cron_job", "provenience_id"=>$model->id]], [
                                 'title' => Yii::t('vbt-cron', 'Logs'),
+                                'data-pjax' => 0,
+                            ]);
+                        },
+                        'running' => function ($url, CronJob $model) {
+                            return Html::a('<i class="glyphicon glyphicon-road"></i>', ['/cron/commands-spool/index', 'CommandsSpoolSearch' => ["provenience"=>"cron_job", "provenience_id"=>$model->id]], [
+                                'title' => Yii::t('vbt-cron', 'Coda di esecuzione'),
                                 'data-pjax' => 0,
                             ]);
                         },

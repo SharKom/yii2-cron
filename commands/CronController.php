@@ -11,6 +11,7 @@ namespace sharkom\cron\commands;
 use Cron\CronExpression;
 use http\Params;
 use sharkom\cron\models\CronJob;
+use sharkom\devhelper\LogHelper;
 use yii\console\Controller;
 use yii\console\widgets\Table;
 use yii\helpers\ArrayHelper;
@@ -62,17 +63,30 @@ class CronController extends Controller
      */
     public function actionRun()
     {
-        $this->unlock();
+        //$this->unlock();
 
         foreach (CronJob::findRunnable() as $job) {
 
+            LogHelper::log("info", $job);
+
             if (CronExpression::factory($job->schedule)->isDue()) {
-                echo "[" . date('Y-m-d H:i:s') . "] ". Console::ansiFormat("[info]", [Console::FG_GREEN]) . " - ".$job->id." - ".$job->name." - isDue". PHP_EOL;
-                $this->run('/cron/job/run', [$job->id]);
+                //echo "[" . date('Y-m-d H:i:s') . "] ". Console::ansiFormat("[info]", [Console::FG_GREEN]) . " - ".$job->id." - ".$job->name." - isDue". PHP_EOL;
+                //$this->run('/cron/job/run', [$job->id]);
+                $conn=Yii::$app->db;
+                $exists=$conn->createCommand("select * from commands_spool where command='$job->command' and completed=0 and executed_at is null")->queryOne();
+                if(!$exists) {
+                    $conn->createCommand()->insert("commands_spool", [
+                        "command"=>$job->command,
+                        "provenience"=>"cron",
+                        "provenience_id"=>$job->id,
+                        "logs_file"=>$job->logfile,
+                        "created_at"=>date("Y-m-d H:i:s")
+                    ])->execute();
+                }
             }
         }
 
-        $this->purgeLogs();
+        //$this->purgeLogs();
     }
 
 
@@ -99,6 +113,7 @@ class CronController extends Controller
 
             $result=$conn->createCommand("delete from cron_job_run where id=$job[id]")->execute();
 
+            /*
             if ($module->has('customNotification')) {
                 $notificationComponent = $module->get('customNotification');
                 $title="Notifica sblocco CronJob $cronJobName";
@@ -111,16 +126,16 @@ class CronController extends Controller
                 //Yii::warning('Il componente di notifica personalizzato non è impostato nel modulo corrente.');
             }
             //Qui raccogliere i dati dei job incagliati individuati
+            */
         }
 
+        /*
         if (!empty($cronJobData)) {
-
             if($module->params["sendNotifications"]===true) {
                 $this->sendUlockNotify($cronJobData);
             }
-
-
         }
+        */
 
         //Qui mandare una mail di notifica
     }

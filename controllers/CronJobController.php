@@ -105,12 +105,32 @@ class CronJobController extends Controller
 
     public function actionRun($id) {
         $model = $this->findModel($id);
-        $model->run();
+        if ($model) {
+            $conn=Yii::$app->db;
+            $res=$conn->createCommand()->insert('commands_spool', [
+                'command' => $model->command,
+                'provenience' => 'cron_job',
+                'provenience_id' => $model->id,
+                'logs_file' => $model->logfile,
+                'created_at' => date('Y-m-d H:i:s')
+            ])->execute();
+
+            if($res){
+                Yii::$app->session->setFlash(
+                    'success',
+                    Yii::t("vbt-cron", "Il comando è stato messo in coda di esecuzione")
+                );
+
+                return $this->redirect(['index']);
+            }
+        }
+
         Yii::$app->session->setFlash(
-            'success',
-            Yii::t("vbt-cron", "Execution success")
+            'error',
+            Yii::t("vbt-cron", "Il comando non è stato messo in coda di esecuzione")
         );
         return $this->redirect(['index']);
+
     }
 
     /**
