@@ -459,32 +459,60 @@ EOT;
 
         $iterationCount = 0;
         $lastMemory = 0;
-
+ 
         $conn = Yii::$app->db;
 
         //prendo tutti i comandi rimasti in sospeso
         $res=$conn->createCommand("select * from commands_spool where completed=0 AND executed_at is not null")->queryAll();
-        foreach($res as $interrupted) {
-            //cerco nel file di log tutto il testo che inizia da "=== COMMAND EXECUTION START {$interrupted['id']} ===\n"
-            $logFile=$interrupted["logs_file"];
-            $logContent = file_get_contents($logFile);
-            $startPos = strpos($logContent, "=== COMMAND EXECUTION START {$interrupted['id']} ===\n");
-            $logs=null;
-            if($startPos!==false) {
-                $logs = substr($logContent, $startPos);
+
+        foreach ($res as $interrupted) {
+            $logFile = $interrupted["logs_file"];
+            $targetStart = "=== COMMAND EXECUTION START {$interrupted['id']} ===\n";
+            $logs = null;
+
+            if (is_readable($logFile)) {
+                $handle = fopen($logFile, "r");
+                if ($handle) {
+                    $startFound = false;
+                    $logsBuffer = [];
+
+                    while (($line = fgets($handle)) !== false) {
+                        if (!$startFound) {
+                            // Cerca il punto di inizio
+                            if (strpos($line, $targetStart) !== false) {
+                                $startFound = true;
+                                $logsBuffer[] = $line;
+                            }
+                        } else {
+                            // Dopo aver trovato il punto di inizio, accumula il log
+                            $logsBuffer[] = $line;
+                        }
+
+                        // Condizione per interrompere la lettura se necessario
+                        if ($startFound && count($logsBuffer) > 1000) {
+                            // Ad esempio, leggi solo 1000 righe dopo il match
+                            break;
+                        }
+                    }
+                    fclose($handle);
+
+                    if ($startFound) {
+                        $logs = implode("", $logsBuffer);
+                    }
+                }
             }
 
             $conn->createCommand()->update(
                 "commands_spool",
                 [
-                    "result"=>"fatal",
-                    "completed"=>-1,
-                    "logs"=>"Informazioni recuperate dai log dopo la chiusura imprevista del processo: \n\n---------------------------------\n".$logs
+                    "result" => "fatal",
+                    "completed" => -1,
+                    "logs" => "Informazioni recuperate dai log dopo la chiusura imprevista del processo: \n\n---------------------------------\n" . $logs
                 ],
-                "id=${interrupted["id"]}"
+                "id={$interrupted["id"]}"
             )->execute();
-
         }
+
 
         while ($this->running) {
             $iterationCount++;
