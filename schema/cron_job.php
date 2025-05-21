@@ -92,10 +92,10 @@
        'unsigned' => false,
        'comment' => '',
     ),
-     'max_execution_time' => 
+     'execution_time' => 
     (object) array(
        'disableJsonSupport' => false,
-       'name' => 'max_execution_time',
+       'name' => 'execution_time',
        'allowNull' => true,
        'type' => 'integer',
        'phpType' => 'integer',

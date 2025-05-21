@@ -20,37 +20,72 @@ $search = "$('.search-button').click(function(){
 $this->registerJs($search);
 
 $actual = false;
-$isHistoryRaw = isset($_GET['CommandsSpoolSearch']['history']) && $_GET['CommandsSpoolSearch']['history']==1 ? $actual = true : $actual = false;
+$isHistoryRaw = isset($_GET['CommandsSpoolSearch']['history']) && $_GET['CommandsSpoolSearch']['history']!=0 ? $actual = true : $actual = false;
 
+$provenience = isset($_GET['CommandsSpoolSearch']['provenience']) ? $_GET['CommandsSpoolSearch']['provenience'] : null;
 
+$params=$_GET;
+
+$this->title="Esecuzione comandi";
 
 LogViewerAsset::register($this);
 
 ?>
 <div class="commands-spool-index box box-primary">
     <div class="box-body">
-
-
-    <?php // echo $this->render('_search', ['model' => $searchModel]); ?>
-
-    <p>
-        <?= Html::a(Yii::t('app', 'Nuovo Record Commands Spool'), ['create'], ['class' => 'btn btn-success']) ?>
-        <?= Html::a(Yii::t('app', 'Ricerca Avanzata'), '#', ['class' => 'btn btn-info search-button']) ?>
-
-        <?php
-
-
-
-
-
-
-        ?>
-    </p>
-    <div class="search-form" style="display:none">
-        <?=  $this->render('_search', ['model' => $searchModel]); ?>
-    </div>
     <?php
+    //se esiste il namespace ed è acccessibile \sharkom\devhelper\widgets\AdvancedFiltersBox
+    if (class_exists('\sharkom\devhelper\widgets\AdvancedFiltersBox')) {
 
+        $filters = [
+            'route' => "/".Yii::$app->controller->module->id . '/commands-spool/index',
+            'box_title'=>"Filtri Avanzati",
+            'filters' => [
+                [
+                    'title' => '',
+                    'items' => [
+                        [
+                            'type' => 'customDropdown',
+                            'values'=>[
+                                '0' => 'Coda di esecuzione',
+                                '1' => 'Storico esecuzioni',
+                                '2' => 'Tutti',
+                            ],
+                            'name' => 'CommandsSpoolSearch[history]',
+                            'label' => 'Mostra:',
+                            'selectedValue'=> isset($params['CommandsSpoolSearch']['history']) ? $params['CommandsSpoolSearch']['history'] : 0,
+                        ],
+                    ],
+                ], [
+                    'title' => '',
+                    'items' => [
+                        [
+                            'type' => 'customDropdown',
+                            'values'=>[
+                                'cron_job' => 'Cron Job',
+                                '' => 'Tutte le esecuzioni',
+                            ],
+                            'name' => 'CommandsSpoolSearch[provenience]',
+                            'label' => 'Provenienza:',
+                            'selectedValue'=> isset($params['CommandsSpoolSearch']['provenience']) ? $params['CommandsSpoolSearch']['provenience'] : 0,
+                        ],
+                    ],
+                ], [
+                    'title' => '',
+                    'items' => [
+
+                    ],
+                ], [
+                    'title' => '',
+                    'items' => [
+
+                    ],
+                ],
+            ]
+        ];
+
+        echo \sharkom\devhelper\widgets\AdvancedFiltersBox::widget($filters);
+    }
 
 
 $gridColumn = [];
@@ -129,6 +164,21 @@ if ($actual) {
     ];
 }
 
+if(!$provenience){
+    $gridColumn[] = [
+        'attribute' => 'provenience',
+        'label' => 'Provenienza',
+        'format' => 'raw',
+        'value' => function ($model) {
+            if (!empty($model->provenience)) {
+                return "<span class=\"label label-default\">{$model->provenience}</span>";
+            }
+            return '<span class="label label-default">N/A</span>';
+        },
+        'contentOptions' => ['style' => 'text-align: center; vertical-align: middle;'],
+    ];
+}
+
 // Ora facciamo il merge con le colonne comuni
 $gridColumn = array_merge($gridColumn, [
     ['attribute' => 'id', 'visible' => false],
@@ -149,6 +199,12 @@ $gridColumn = array_merge($gridColumn, [
                     }
             }
         },
+        //aggiungi tendina filtro
+        'filter' => [
+            '0' => 'In coda/In esecuzione',
+            '1' => 'Eseguito',
+            '-1' => 'Esecuzione incompleta'
+        ],
         'contentOptions' => ['style' => 'text-align: center; vertical-align: middle;'],
     ],
     [
@@ -193,6 +249,12 @@ $gridColumn = array_merge($gridColumn, [
 
             }
         },
+        //add select filter with success, error and fatal
+        'filter' => [
+            'success' => 'OK',
+            'error' => 'Errore',
+            'fatal' => 'Fatal'
+        ],
         'contentOptions' => ['style' => 'text-align: center; vertical-align: middle;'],
     ],
     [
@@ -209,7 +271,7 @@ $gridColumn = array_merge($gridColumn, [
     ],
     [
         'attribute' => 'completed_at',
-        'label' => 'Duarata',
+        'label' => 'Durata',
         'format' => 'raw',
         'value' => function ($model) {
             if (!empty($model->completed_at)) {
@@ -264,7 +326,7 @@ $gridColumn = array_merge($gridColumn, [
         'dataProvider' => $dataProvider,
         'filterModel' => $searchModel,
         'columns' => $gridColumn,
-        'layout' => "{toolbar}\n{items}\n{summary}\n{pager}",
+        'layout' => "{items}\n{summary}\n{pager}",
         'pjax' => true,
         'pjaxSettings' => ['options' => ['id' => 'kv-pjax-container-commands-spool']],
         'responsive' => false,

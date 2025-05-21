@@ -16,7 +16,7 @@ class CronJobSearch extends CronJob
     public function rules()
     {
         return [
-            [['id', 'last_id', 'max_execution_time', 'active'], 'integer'],
+            [['id', 'last_id', 'execution_time', 'active'], 'integer'],
             [['name', 'schedule', 'command', 'logfile'], 'safe'],
         ];
     }
@@ -61,7 +61,7 @@ class CronJobSearch extends CronJob
             ['like', 'schedule', $this->schedule],
             ['like', 'command', $this->command],
             ['like', 'logfile', $this->logfile],
-            ['max_execution_time' => $this->max_execution_time],
+            ['execution_time' => $this->execution_time],
         ]);
 
         if (is_numeric($this->active) || is_bool($this->active)) {

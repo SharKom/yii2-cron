@@ -594,7 +594,7 @@ EOT;
                 if (is_resource($process)) {
                     stream_set_blocking($pipes[1], false);
                     stream_set_blocking($pipes[2], false);
-
+                    $startTime=time();
                     file_put_contents($logFile, "=== COMMAND EXECUTION START {$command['id']} ===\n" . $memoryInfo . "\n\n", FILE_APPEND);
 
                     while (true) {
@@ -690,6 +690,11 @@ EOT;
                                 'result' => 'fatal',
                                 'logs_file' => $logFile
                             ], ['id' => $command['id']])->execute();
+
+                            $endtime=time();
+                            $executionTime=$endtime-$startTime;
+
+                            $this->updateCronJob($command, $executionTime, "ML");
                             break;
                         }
                     }
@@ -703,6 +708,11 @@ EOT;
                         'result' => $returnValue === 0 ? 'success' : 'error',
                         'logs_file' => $logFile
                     ], ['id' => $command['id']])->execute();
+
+                    $endtime=time();
+                    $executionTime=$endtime-$startTime;
+                    $exitCode=$returnValue === 0 ? "OK" : "KO";
+                    $this->updateCronJob($command, $executionTime, $exitCode);
 
                 } else {
                     throw new \Exception("Failed to start process");
@@ -728,6 +738,10 @@ EOT;
                     'errors' => $e->getMessage(),
                     'result' => 'error'
                 ], ['id' => $command['id']])->execute();
+
+                $endtime=time();
+                $executionTime=$endtime-$startTime;
+                $this->updateCronJob($command, $executionTime, "KO");
             }
 
             // Cleanup after command execution
@@ -780,6 +794,18 @@ EOT;
         return ExitCode::OK;
     }
 
+    private function updateCronJob(array $command, int $seconds = null, $exit_code)
+    {
+        if ($command['provenience'] !== 'cron_job' || empty($command['provenience_id'])) {
+            return;
+        }
+        Yii::$app->db->createCommand()->update('cron_job', [
+            'execution_time' => $seconds,
+            'last_execution' => new Expression('NOW()'),
+            'exit_code' => $exit_code,
+        ], ['id' => $command['provenience_id']])->execute();
+        LogHelper::log('info', "cron_job #{$command['provenience_id']} updated: time={$seconds}s");
+    }
 
 
 }

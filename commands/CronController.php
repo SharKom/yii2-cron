@@ -18,7 +18,7 @@ use yii\helpers\ArrayHelper;
 use yii\helpers\Console;
 use Yii;
 
-date_default_timezone_set("europe/rome");
+date_default_timezone_set('europe/rome');
 
 /**
  * Class JobController
@@ -67,20 +67,20 @@ class CronController extends Controller
 
         foreach (CronJob::findRunnable() as $job) {
 
-            LogHelper::log("info", $job);
+            LogHelper::log('info', $job);
 
             if (CronExpression::factory($job->schedule)->isDue()) {
                 //echo "[" . date('Y-m-d H:i:s') . "] ". Console::ansiFormat("[info]", [Console::FG_GREEN]) . " - ".$job->id." - ".$job->name." - isDue". PHP_EOL;
                 //$this->run('/cron/job/run', [$job->id]);
-                $conn=Yii::$app->db;
-                $exists=$conn->createCommand("select * from commands_spool where command='$job->command' and completed=0 and executed_at is null")->queryOne();
-                if(!$exists) {
-                    $conn->createCommand()->insert("commands_spool", [
-                        "command"=>$job->command,
-                        "provenience"=>"cron",
-                        "provenience_id"=>$job->id,
-                        "logs_file"=>$job->logfile,
-                        "created_at"=>date("Y-m-d H:i:s")
+                $conn = Yii::$app->db;
+                $exists = $conn->createCommand("select * from commands_spool where command='$job->command' and completed=0 and executed_at is null")->queryOne();
+                if (!$exists) {
+                    $conn->createCommand()->insert('commands_spool', [
+                        'command' => $job->command,
+                        'provenience' => 'cron_job',
+                        'provenience_id' => $job->id,
+                        'logs_file' => $job->logfile,
+                        'created_at' => date('Y-m-d H:i:s')
                     ])->execute();
                 }
             }
@@ -90,14 +90,14 @@ class CronController extends Controller
     }
 
 
-
-    private function unlock() {
-        $conn=Yii::$app->db;
+    private function unlock()
+    {
+        $conn = Yii::$app->db;
 
         $moduleID = $moduleID ?? Yii::$app->controller->module->id;
         $module = Yii::$app->getModule($moduleID);
 
-        $result=$conn->createCommand("select * from cron_job_run where in_progress=1 and start<(NOW() - INTERVAL 1 HOUR)")->queryAll();
+        $result = $conn->createCommand('select * from cron_job_run where in_progress=1 and start<(NOW() - INTERVAL 1 HOUR)')->queryAll();
         $cronJobData = [];
         foreach ($result as $job) {
 
@@ -106,12 +106,12 @@ class CronController extends Controller
                 'name' => $cronJobName,
                 'start' => $job['start'],
                 'finish' => $job['finish'],
-                'runtime' =>$job['runtime'] ,
+                'runtime' => $job['runtime'],
                 'error_output' => $job['error_output'],
             ];
-            $result=$conn->createCommand("update cron_job set last_id=null where id=$job[job_id]")->execute();
+            $result = $conn->createCommand("update cron_job set last_id=null where id=$job[job_id]")->execute();
 
-            $result=$conn->createCommand("delete from cron_job_run where id=$job[id]")->execute();
+            $result = $conn->createCommand("delete from cron_job_run where id=$job[id]")->execute();
 
             /*
             if ($module->has('customNotification')) {
@@ -139,29 +139,32 @@ class CronController extends Controller
 
         //Qui mandare una mail di notifica
     }
-    private function sendUlockNotify($cronJobData){
+
+    private function sendUlockNotify($cronJobData)
+    {
         $subject = 'Notifica sblocco CronJob';
 
-        $body = 'I seguenti cronjob sono stati sbloccati:'  . "\n";
+        $body = 'I seguenti cronjob sono stati sbloccati:' . "\n";
         foreach ($cronJobData as $jobData) {
-            $body .= 'CronJob: ' . $jobData['name'] . ', Inzio: ' . $jobData['start'] . ', Fine: ' . $jobData['finish'] . ', Tempo di esecuzione: ' . $jobData['runtime'] . ' secondi' . ', Output errore: ' . $jobData['error_output'] .  "\n" ;
+            $body .= 'CronJob: ' . $jobData['name'] . ', Inzio: ' . $jobData['start'] . ', Fine: ' . $jobData['finish'] . ', Tempo di esecuzione: ' . $jobData['runtime'] . ' secondi' . ', Output errore: ' . $jobData['error_output'] . "\n";
         }
         Yii::$app->mailer->compose()
-            ->setTo(Yii::$app->params["NotificationsEmail"])
+            ->setTo(Yii::$app->params['NotificationsEmail'])
             ->setFrom([Yii::$app->params['senderEmail'] => Yii::$app->name])
             ->setSubject($subject)
             ->setTextBody($body)
             ->send();
     }
 
-    private function purgeLogs(){
-        $conn=Yii::$app->db;
+    private function purgeLogs()
+    {
+        $conn = Yii::$app->db;
         $module = Yii::$app->getModule(Yii::$app->controller->module->id);
 
-        if(isset($module->params["purge_log_interval"])) {
-            $months=$module->params["purge_log_interval"];
+        if (isset($module->params['purge_log_interval'])) {
+            $months = $module->params['purge_log_interval'];
         } else {
-            $months=3;
+            $months = 3;
         }
 
         $conn->createCommand("delete from cron_job_run where start<(NOW() - INTERVAL $months MONTH)")->execute();

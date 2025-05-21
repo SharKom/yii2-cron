@@ -25,9 +25,7 @@ use sharkom\widgets\CronJob;
     <?= $form->field($model, 'command')->textInput(['maxlength' => true]) ?>
 
     <?= $form->field($model, 'logfile')->textInput(['maxlength' => true]) ?>
-
-    <?= $form->field($model, 'max_execution_time')->textInput() ?>
-
+    
     <?= $form->field($model, 'active')->checkbox() ?>
 
     <div class="form-group">

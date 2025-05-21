@@ -6,11 +6,12 @@ use Yii;
 use yii\base\Model;
 use yii\data\ActiveDataProvider;
 use sharkom\cron\models\CommandsSpool;
+use yii\db\Expression;
 
 /**
- * sharkom\cron\models\CommandsSpoolSearch represents the model behind the search form about `sharkom\cron\models\CommandsSpool`.
+ * sharkom\cron\models\CommandsSpoolSearch represents the model behind the search form about sharkom\cron\models\CommandsSpool.
  */
- class CommandsSpoolSearch extends CommandsSpool
+class CommandsSpoolSearch extends CommandsSpool
 {
     public $history;
 
@@ -43,51 +44,93 @@ use sharkom\cron\models\CommandsSpool;
      */
     public function search($params)
     {
-        $query = CommandsSpool::find();
-
+        // 1) Costruisco la query e aggiungo la colonna virtuale statusOrder
+        $query = CommandsSpool::find()
+            ->select([
+                '{{%commands_spool}}.*',
+                // statusOrder = 0 se completed=0, altrimenti 1
+                new Expression('CASE WHEN completed=0 THEN 0 ELSE 1 END AS statusOrder'),
+            ]);
 
         $this->load($params);
 
-        if(!empty($this->history) && $this->history==1) {
-            $defaultSort=["executed_at"=>SORT_DESC];
-        } else {
-            $defaultSort=["created_at"=>SORT_ASC];
-
+        // 2) Imposto l'ordine di default in base a history
+        $defaultSort = ['executed_at' => SORT_DESC];
+        if (isset($this->history)) {
+            switch ($this->history) {
+                case 0:
+                    $defaultSort = ['created_at' => SORT_ASC];
+                    break;
+                case 1:
+                    $defaultSort = ['executed_at' => SORT_DESC];
+                    break;
+                case 2:
+                    // qui usiamo il sort virtuale byStatus
+                    $defaultSort = ['byStatus' => SORT_ASC];
+                    break;
+            }
         }
 
+        // 3) Configuro l'ActiveDataProvider con il defaultOrder
         $dataProvider = new ActiveDataProvider([
             'query' => $query,
-            'sort'=>["defaultOrder"=>$defaultSort]
+            'sort'  => [
+                'defaultOrder' => $defaultSort,
+                'attributes'   => [
+                    // mantengo tutti gli attributi di default...
+                    'id',
+                    'command',
+                    'provenience',
+                    'created_at',
+                    'executed_at',
+                    'completed_at',
+                    'completed',
+                    'result',
+                    // ...e aggiungo il virtual sort byStatus:
+                    'byStatus' => [
+                        'asc'  => ['statusOrder' => SORT_ASC, 'executed_at' => SORT_DESC],
+                        'desc' => ['statusOrder' => SORT_DESC, 'executed_at' => SORT_DESC],
+                        'label' => 'Stato / Executed At',
+                    ],
+                ],
+            ],
         ]);
 
         if (!$this->validate()) {
-            // uncomment the following line if you do not want to return any records when validation fails
-            // $query->where('0=1');
             return $dataProvider;
         }
 
-        if(!empty($this->history) && $this->history==1) {
-            $query->andWhere(["completed"=>[1, -1]]);
-        } else {
-            $query->andWhere(["completed"=>0]);
-
+        // 4) Filtri di history sulla colonna completed
+        if (isset($this->history)) {
+            switch ($this->history) {
+                case 0:
+                    $query->andWhere(['completed' => 0]);
+                    break;
+                case 1:
+                    $query->andWhere(['completed' => [1, -1]]);
+                    break;
+                case 2:
+                    $query->andWhere(['completed' => [0, 1, -1]]);
+                    break;
+            }
         }
 
+        // 5) Altri filtri
         $query->andFilterWhere([
-            'id' => $this->id,
-            'provenience_id' => $this->provenience_id,
-            'created_at' => $this->created_at,
-            'executed_at' => $this->executed_at,
-            'completed_at' => $this->completed_at,
+            'id'              => $this->id,
+            'provenience_id'  => $this->provenience_id,
+            'created_at'      => $this->created_at,
+            'executed_at'     => $this->executed_at,
+            'completed_at'    => $this->completed_at,
         ]);
 
-        $query->andFilterWhere(['like', 'command', $this->command])
-            ->andFilterWhere(['like', 'provenience', $this->provenience])
-            ->andFilterWhere(['like', 'logs', $this->logs])
-            ->andFilterWhere(['like', 'errors', $this->errors])
-            ->andFilterWhere(['like', 'logs_file', $this->logs_file])
-            ->andFilterWhere(['like', 'completed', $this->completed])
-            ->andFilterWhere(['like', 'result', $this->result]);
+        $query->andFilterWhere(['like', 'command',      $this->command])
+            ->andFilterWhere(['like', 'provenience',  $this->provenience])
+            ->andFilterWhere(['like', 'logs',         $this->logs])
+            ->andFilterWhere(['like', 'errors',       $this->errors])
+            ->andFilterWhere(['like', 'logs_file',    $this->logs_file])
+            ->andFilterWhere(['like', 'completed',    $this->completed])
+            ->andFilterWhere(['like', 'result',       $this->result]);
 
         return $dataProvider;
     }

@@ -76,8 +76,8 @@ class CommandsSpool extends \yii\db\ActiveRecord
             'logs_file' => Yii::t('app', 'Logs File'),
             'executed_at' => Yii::t('app', 'Executed At'),
             'completed_at' => Yii::t('app', 'Completed At'),
-            'completed' => Yii::t('app', 'Completed'),
-            'result' => Yii::t('app', 'Result'),
+            'completed' => Yii::t('app', 'Stato'),
+            'result' => Yii::t('app', 'Risultato'),
         ];
     }
 

@@ -3,7 +3,7 @@
 use yii\db\Migration;
 
 /**
- * Handles adding max_execution_time to table `{{%cron_job}}`.
+ * Handles adding execution_time to table `{{%cron_job}}`.
  */
 class m190525_122152_add_max_execution_time_column_to_cron_job_table extends Migration
 {

@@ -23,7 +23,7 @@ use yii\db\Expression;
  * @property string $name
  * @property string $schedule
  * @property string $command
- * @property int $max_execution_time
+ * @property int $execution_time
  * @property boolean $active
  *
  * @property CronJobRun[] $cronJobRuns
@@ -45,9 +45,10 @@ class CronJob extends ActiveRecord
     public function rules()
     {
         return [
-            [['last_id', 'max_execution_time'], 'integer'],
+            [['last_id', 'execution_time'], 'integer'],
             [['active'], 'boolean'],
-            [['name', 'schedule', 'command', 'logfile'], 'string', 'max' => 255],
+            [['last_execution'], 'safe'],
+            [['name', 'schedule', 'command', 'logfile', 'exit_code'], 'string', 'max' => 255],
         ];
     }
 
@@ -63,8 +64,9 @@ class CronJob extends ActiveRecord
             'schedule' => Yii::t('vbt-cron', 'Schedule'),
             'command' => Yii::t('vbt-cron', 'Command'),
             'logfile' => Yii::t('vbt-cron', 'Log File'),
-            'max_execution_time' => Yii::t('vbt-cron', 'Max execution time'),
+            'execution_time' => Yii::t('vbt-cron', 'Tempo di esecuzione'),
             'active' => Yii::t('vbt-cron', 'Active'),
+            'last_execution' => Yii::t('vbt-cron', 'Ultima esecuzione'),
         ];
     }
 
@@ -121,7 +123,7 @@ class CronJob extends ActiveRecord
         $moduleID = $moduleID ?? Yii::$app->controller->module->id;
         $module = Yii::$app->getModule($moduleID);
 
-        $process = $this->buildProcess($this->command, $this->max_execution_time ?? 60);
+        $process = $this->buildProcess($this->command, $this->execution_time ?? 60);
         $process->start();
 
         $start = microtime(true);

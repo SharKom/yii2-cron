@@ -40,39 +40,22 @@ $this->params['breadcrumbs'][] = $this->title;
                 ],
                 [
                     'class' => '\kartik\grid\DataColumn',
-                    'attribute' => 'max_execution_time',
+                    'attribute' => 'execution_time',
+                ],
+                [
+                    'class' => '\kartik\grid\DataColumn',
+                    'attribute' => 'last_execution',
+                ],
+                [
+                    'attribute' => 'exit_code',
+                    'format' => 'raw',
+                    'value' => function ($model) {
+                        return $model->exit_code == "OK" ? '<span class="label label-success">OK</span>' : '<span class="label label-danger">'.$model->exit_code.'</span>';
+                    },
                 ],
                 [
                     'class' => '\kartik\grid\DataColumn',
                     'attribute' => 'active',
-                    'format' => 'boolean',
-                ],
-                [
-                    'class' => '\kartik\grid\DataColumn',
-                    'attribute' => 'last.start'
-                ],
-                [
-                    'class' => '\kartik\grid\DataColumn',
-                    'attribute' => 'last.runtime'
-                ],
-                [
-                    'class' => '\kartik\grid\DataColumn',
-                    'attribute' => 'last.exit_code'
-                ],
-                [
-                    'class' => '\kartik\grid\DataColumn',
-                    'value' => function (CronJob $job) {
-                        if ($job->last_id === null) {
-                            return null;
-                        }
-                        if(isset($job->last->exit_code)) {
-                            return $job->last->exit_code == 0 ? true : false;
-                        } else {
-                            return false;
-                        }
-
-                    },
-                    'label' => Yii::t('vbt-cron', 'Success'),
                     'format' => 'boolean',
                 ],
                 [
