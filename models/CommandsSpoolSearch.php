@@ -45,12 +45,14 @@ class CommandsSpoolSearch extends CommandsSpool
     public function search($params)
     {
         // 1) Costruisco la query e aggiungo la colonna virtuale statusOrder
+        $table    = CommandsSpool::getTableSchema();
+        $cols     = $table->columnNames;
+        $filtered = array_diff($cols, ['logs']);
+
         $query = CommandsSpool::find()
-            ->select([
-                '{{%commands_spool}}.*',
-                // statusOrder = 0 se completed=0, altrimenti 1
-                new Expression('CASE WHEN completed=0 THEN 0 ELSE 1 END AS statusOrder'),
-            ]);
+            ->select($filtered)
+            ->addSelect(new Expression('CASE WHEN completed=0 THEN 0 ELSE 1 END AS statusOrder'));
+
 
         $this->load($params);
 
@@ -122,10 +124,11 @@ class CommandsSpoolSearch extends CommandsSpool
             'created_at'      => $this->created_at,
             'executed_at'     => $this->executed_at,
             'completed_at'    => $this->completed_at,
+            'provenience' =>$this->provenience,
         ]);
 
         $query->andFilterWhere(['like', 'command',      $this->command])
-            ->andFilterWhere(['like', 'provenience',  $this->provenience])
+            //->andFilterWhere(['like', 'provenience',  $this->provenience])
             ->andFilterWhere(['like', 'logs',         $this->logs])
             ->andFilterWhere(['like', 'errors',       $this->errors])
             ->andFilterWhere(['like', 'logs_file',    $this->logs_file])

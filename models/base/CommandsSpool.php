@@ -46,8 +46,8 @@ class CommandsSpool extends \yii\db\ActiveRecord
         return [
             [['provenience_id'], 'integer'],
             [['logs', 'errors', 'result'], 'string'],
-            [['created_at', 'executed_at', 'completed_at'], 'safe'],
-            [['command', 'logs_file'], 'string', 'max' => 200],
+            [['created_at', 'executed_at', 'completed_at','command'], 'safe'],
+            [['logs_file'], 'string', 'max' => 200],
             [['provenience'], 'string', 'max' => 100],
             [['completed'], 'string', 'max' => 4]
         ];
@@ -76,8 +76,8 @@ class CommandsSpool extends \yii\db\ActiveRecord
             'logs_file' => Yii::t('app', 'Logs File'),
             'executed_at' => Yii::t('app', 'Executed At'),
             'completed_at' => Yii::t('app', 'Completed At'),
-            'completed' => Yii::t('app', 'Stato'),
-            'result' => Yii::t('app', 'Risultato'),
+            'completed' => Yii::t('app', 'Completed'),
+            'result' => Yii::t('app', 'Result'),
         ];
     }
 

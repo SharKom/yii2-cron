@@ -19,8 +19,8 @@ class CommandsSpool extends BaseCommandsSpool
 	    [
             [['provenience_id'], 'integer'],
             [['logs', 'errors', 'result'], 'string'],
-            [['created_at', 'executed_at', 'completed_at'], 'safe'],
-            [['command', 'logs_file'], 'string', 'max' => 200],
+            [['created_at', 'executed_at', 'completed_at','command'], 'safe'],
+            [['logs_file'], 'string', 'max' => 200],
             [['provenience'], 'string', 'max' => 100],
             [['completed'], 'string', 'max' => 4]
         ]);

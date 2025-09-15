@@ -8,6 +8,7 @@ use sharkom\devhelper\LogHelper;
 use yii\console\Controller;
 use yii\console\ExitCode;
 use yii\db\Expression;
+use sharkom\cron\models\CommandsSpool;
 use Yii;
 
 class SpoolerController extends Controller
@@ -501,7 +502,7 @@ EOT;
                     }
                 }
             }
-
+            /*
             $conn->createCommand()->update(
                 "commands_spool",
                 [
@@ -510,7 +511,15 @@ EOT;
                     "logs" => "Informazioni recuperate dai log dopo la chiusura imprevista del processo: \n\n---------------------------------\n" . $logs
                 ],
                 "id={$interrupted["id"]}"
-            )->execute();
+            )->execute();*/
+
+            $spool = CommandsSpool::findOne($interrupted['id']);
+            if ($spool) {
+                $spool->result = 'fatal';
+                $spool->completed = -1;
+                $spool->logs = "Informazioni recuperate dai log dopo la chiusura imprevista del processo: \n\n---------------------------------\n" . $logs;
+                $spool->save(false);
+            }
         }
 
 
@@ -569,9 +578,18 @@ EOT;
 
                 // Mark as being executed
                 $executionStart = date('Y-m-d H:i:s');
+                /*
                 Yii::$app->db->createCommand()->update('commands_spool', [
                     'executed_at' => new Expression('NOW()')
                 ], ['id' => $command['id']])->execute();
+                */
+
+                $spool = CommandsSpool::findOne($command['id']);
+                if ($spool) {
+                    $spool->executed_at = new \yii\db\Expression('NOW()');
+                    $spool->save(false);
+                }
+
 
                 $logFile = !empty($command["logs_file"]) ? $command["logs_file"] : Yii::getAlias("@runtime/logs/command_{$command["provenience"]}_{$command["provenience_id"]}.log");
 
@@ -682,6 +700,7 @@ EOT;
                     // Se siamo in shutdown e il processo è ancora attivo, controlliamo il timeout
                     if ($this->shouldExit) {
                         if ($this->checkShutdownTimeout()) {
+                            /*
                             Yii::$app->db->createCommand()->update('commands_spool', [
                                 'completed' => -1,
                                 'completed_at' => new Expression('NOW()'),
@@ -690,16 +709,32 @@ EOT;
                                 'result' => 'fatal',
                                 'logs_file' => $logFile
                             ], ['id' => $command['id']])->execute();
+                            */
+
+                            $spool = CommandsSpool::findOne($command['id']);
+                            if ($spool) {
+                                $spool->completed = -1;
+                                $spool->completed_at = new \yii\db\Expression('NOW()');
+                                $spool->logs = $stdout;
+                                $spool->errors = $stderr;
+                                $spool->result = 'fatal';
+                                $spool->logs_file = $logFile;
+                                $spool->save(false);
+                            }
+
 
                             $endtime=time();
                             $executionTime=$endtime-$startTime;
 
                             $this->updateCronJob($command, $executionTime, "ML");
+                            $this->sendErrorEmail($command['command'], "Shutdown timeout reached", $stdout);
+                            $this->notification($command['command'], "Shutdown timeout reached", $stdout);
                             break;
                         }
                     }
 
                     // Update database
+                    /*
                     Yii::$app->db->createCommand()->update('commands_spool', [
                         'completed' => 1,
                         'completed_at' => new Expression('NOW()'),
@@ -708,11 +743,28 @@ EOT;
                         'result' => $returnValue === 0 ? 'success' : 'error',
                         'logs_file' => $logFile
                     ], ['id' => $command['id']])->execute();
+                    */
+
+                    $spool = CommandsSpool::findOne($command['id']);
+                    if ($spool) {
+                        $spool->completed = 1;
+                        $spool->completed_at = new \yii\db\Expression('NOW()');
+                        $spool->logs = $stdout;
+                        $spool->errors = $stderr;
+                        $spool->result = $returnValue === 0 ? 'success' : 'error';
+                        $spool->logs_file = $logFile;
+                        $spool->save(false);
+                    }
+
 
                     $endtime=time();
                     $executionTime=$endtime-$startTime;
                     $exitCode=$returnValue === 0 ? "OK" : "KO";
                     $this->updateCronJob($command, $executionTime, $exitCode);
+                    if($exitCode=="KO") {
+                        $this->sendErrorEmail($command['command'], $stderr, $stdout);
+                        $this->notification($command['command'], $stderr, $stdout);
+                    }
 
                 } else {
                     throw new \Exception("Failed to start process");
@@ -732,16 +784,29 @@ EOT;
                     file_put_contents($logFile, "\n=== ERROR ===\n" . $e->getMessage() . "\n", FILE_APPEND);
                 }
 
+                /*
                 Yii::$app->db->createCommand()->update('commands_spool', [
-                    'completed' => 1,
+                    'completed' => 1, 
                     'completed_at' => new Expression('NOW()'),
                     'errors' => $e->getMessage(),
                     'result' => 'error'
                 ], ['id' => $command['id']])->execute();
+                */
+                $spool = CommandsSpool::findOne($command['id']);
+                if ($spool) {
+                    $spool->completed = 1;
+                    $spool->completed_at = new \yii\db\Expression('NOW()');
+                    $spool->errors = $e->getMessage();
+                    $spool->result = 'error';
+                    $spool->save(false);
+                }
+
 
                 $endtime=time();
                 $executionTime=$endtime-$startTime;
                 $this->updateCronJob($command, $executionTime, "KO");
+                $this->sendErrorEmail($command['command'], $e->getMessage(), $stdout);
+                $this->notification($command['command'], $e->getMessage(), $stdout);
             }
 
             // Cleanup after command execution
@@ -807,5 +872,32 @@ EOT;
         LogHelper::log('info', "cron_job #{$command['provenience_id']} updated: time={$seconds}s");
     }
 
+    private function sendErrorEmail($command, $errorOutput, $executionOutput)
+    {
+        LogHelper::log("error", "SEND EMAIL TO ".Yii::$app->params['NotificationsEmail']." Error executing command: $command\nError output: $errorOutput\nExecution output: $executionOutput");
+        Yii::$app->mailer->compose()
+            ->setTo(Yii::$app->params['NotificationsEmail'])
+            ->setFrom([Yii::$app->params['senderEmail'] => Yii::$app->name])
+            ->setSubject('Errore di esecuzione del Cron Job ' . $command)
+            ->setTextBody("Si è verificato un errore durante l'esecuzione del comando: $command\n\nDettagli dell'errore:\n$errorOutput\n\nLog di esecuzione:\n$executionOutput")
+            ->send();
+    }
 
+    private function notification($command,$errorOutput, $executionOutput){
+        LogHelper::log("error", "SEND NOTIFICATION SO Error executing command: $command\nError output: $errorOutput\nExecution output: $executionOutput");
+        $moduleID = $moduleID ?? Yii::$app->controller->module->id;
+        $module = Yii::$app->getModule($moduleID);
+
+        if ($module->has('customNotification')) {
+            $notificationComponent = $module->get('customNotification');
+            $title = "Errore esecuzione cronjob $command";
+            $description = "Si è presentato un errore durante l'esecuzione del cronjob $command il " . date('d/m/Y') . ' alle ' . date('H:i:s');
+
+            $notificationComponent->send($title, $description, 'cron-jobs', 'error', "$command \n\n$errorOutput \n\n$executionOutput");
+        } else {
+            // Gestisci l'errore in un altro modo o ignoralo se il componente non è impostato
+            // Ad esempio, puoi scrivere un messaggio nel log dell'applicazione
+            //Yii::warning('Il componente di notifica personalizzato non è impostato nel modulo corrente.');
+        }
+    }
 }

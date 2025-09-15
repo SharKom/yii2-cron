@@ -64,6 +64,7 @@ class CronController extends Controller
     public function actionRun()
     {
         //$this->unlock();
+        $this->purgeLogs();
 
         foreach (CronJob::findRunnable() as $job) {
 
@@ -167,6 +168,6 @@ class CronController extends Controller
             $months = 3;
         }
 
-        $conn->createCommand("delete from cron_job_run where start<(NOW() - INTERVAL $months MONTH)")->execute();
+        $conn->createCommand("DELETE FROM commands_spool WHERE created_at IS NULL OR created_at < NOW() - INTERVAL $months MONTH;)")->execute();
     }
 }
