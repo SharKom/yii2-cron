@@ -602,12 +602,10 @@ EOT;
                     2 => ["pipe", "w"]
                 ];
 
-                $env = [
-                    'FORCE_COLOR' => '1',
-                    'TERM' => 'xterm-256color'
-                ];
+                putenv('FORCE_COLOR=1');
+                putenv('TERM=xterm-256color');
 
-                $process = proc_open("echo -1 | ".$command['command'], $descriptorspec, $pipes, null, $env);
+                $process = proc_open("echo -1 | ".$command['command'], $descriptorspec, $pipes, null, null);
 
                 if (is_resource($process)) {
                     stream_set_blocking($pipes[1], false);
