@@ -286,9 +286,9 @@ class ReportController extends Controller
         $to = Yii::$app->params['NotificationsEmail'] ?? 'dev@sharkom.net';
 
         try {
-            Yii::$app->mailer->compose()
+            Yii::$app->invoicemailer->compose()
                 ->setTo($to)
-                ->setFrom([Yii::$app->params['senderEmail'] ?? 'no-reply@sharkom.net' => 'SoiundOrgan Spool Report'])
+                ->setFrom([Yii::$app->params['senderEmail'] ?? 'no-reply@sharkom.net' => 'SoundOrgan Spool Report'])
                 ->setSubject($subject)
                 ->setHtmlBody($htmlContent)
                 ->send();

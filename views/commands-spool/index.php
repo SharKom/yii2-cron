@@ -42,6 +42,34 @@ LogViewerAsset::register($this);
             'box_title'=>"Filtri Avanzati",
             'filters' => [
                 [
+                    'title' => 'Scelte rapide:',
+                    'items' => [
+                        [
+                            'type' => 'link',
+                            'text' => 'Mostra la coda di esecuzione',
+                            'url' => ['/cron/commands-spool/index', 'CommandsSpoolSearch[history]' => 0],
+                            'icon'=>'glyphicon glyphicon-road',
+                        ],
+                        [
+                            'type' => 'link',
+                            'text' => 'Mostra lo storico esecuzioni',
+                            'url' => ['/cron/commands-spool/index', 'CommandsSpoolSearch[history]' => 1],
+                            'icon'=>'glyphicon glyphicon-list',
+                        ],
+                        [
+                            'type' => 'link',
+                            'text' => 'Torna ai cron job',
+                            'url' => ['/cron/cron-job/index'],
+                            'icon'=>'fa fa-clock-o',
+                        ]
+                    ],
+                ], [
+                    'title' => '',
+                    'items' => [
+
+                    ],
+                ],
+                [
                     'title' => '',
                     'items' => [
                         [
@@ -69,16 +97,6 @@ LogViewerAsset::register($this);
                             'label' => 'Provenienza:',
                             'selectedValue'=> isset($params['CommandsSpoolSearch']['provenience']) ? $params['CommandsSpoolSearch']['provenience'] : 0,
                         ],
-                    ],
-                ], [
-                    'title' => '',
-                    'items' => [
-
-                    ],
-                ], [
-                    'title' => '',
-                    'items' => [
-
                     ],
                 ],
             ]

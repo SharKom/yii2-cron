@@ -15,6 +15,54 @@ $this->params['breadcrumbs'][] = $this->title;
 
 <div class="cron-job-index">
     <div id="ajaxCrudDatatable">
+        <?php
+        //se esiste il namespace ed è acccessibile \sharkom\devhelper\widgets\AdvancedFiltersBox
+        if (class_exists('\sharkom\devhelper\widgets\AdvancedFiltersBox')) {
+
+            $filters = [
+                'route' => '/' . Yii::$app->controller->module->id . '/commands-spool/index',
+                'box_title' => 'Filtri Avanzati',
+                'filters' => [
+                    [
+                        'title' => 'Scelte rapide:',
+                        'items' => [
+                            [
+                                'type' => 'link',
+                                'text' => 'Mostra la coda di esecuzione',
+                                'url' => ['/cron/commands-spool/index', 'CommandsSpoolSearch[history]' => 0],
+                                'icon' => 'glyphicon glyphicon-road',
+                            ],
+                            [
+                                'type' => 'link',
+                                'text' => 'Mostra lo storico esecuzioni',
+                                'url' => ['/cron/commands-spool/index', 'CommandsSpoolSearch[history]' => 1],
+                                'icon' => 'glyphicon glyphicon-list',
+                            ],
+                        ],
+                    ], [
+                        'title' => '',
+                        'items' => [
+
+                        ],
+                    ],
+                    [
+                        'title' => '',
+                        'items' => [
+
+                        ],
+                    ], [
+                        'title' => '',
+                        'items' => [
+
+                        ],
+                    ],
+                ]
+            ];
+
+            echo \sharkom\devhelper\widgets\AdvancedFiltersBox::widget($filters);
+        }
+        ?>
+
         <?= GridView::widget([
             'dataProvider' => $dataProvider,
             'filterModel' => $searchModel,

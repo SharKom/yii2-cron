@@ -8,6 +8,7 @@ use sharkom\cron\models\CronJobSearch;
 use yii\web\Controller;
 use yii\web\NotFoundHttpException;
 use yii\filters\VerbFilter;
+use sharkom\devhelper\GridviewHelper;
 
 /**
  * CronJobController implements the CRUD actions for CronJob model.
@@ -35,8 +36,14 @@ class CronJobController extends Controller
      */
     public function actionIndex()
     {
+        $result = GridviewHelper::filterMemory('cron-job-filters');
+
+        if ($result instanceof \yii\web\Response) {
+            return $result; // Return the redirect response if applicable
+        }
+
         $searchModel = new CronJobSearch();
-        $dataProvider = $searchModel->search(Yii::$app->request->queryParams);
+        $dataProvider = $searchModel->search($result);
 
         return $this->render('index', [
             'searchModel' => $searchModel,
