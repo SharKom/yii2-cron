@@ -68,7 +68,7 @@ class CronController extends Controller
 
         foreach (CronJob::findRunnable() as $job) {
 
-            LogHelper::log('info', $job);
+            //LogHelper::log('info', $job);
 
             if (CronExpression::factory($job->schedule)->isDue()) {
                 //echo "[" . date('Y-m-d H:i:s') . "] ". Console::ansiFormat("[info]", [Console::FG_GREEN]) . " - ".$job->id." - ".$job->name." - isDue". PHP_EOL;
