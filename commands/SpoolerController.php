@@ -11,28 +11,39 @@ use yii\db\Expression;
 use sharkom\cron\models\CommandsSpool;
 use Yii;
 
+if (!defined('SIGTERM')) define('SIGTERM', 15);
+if (!defined('SIGKILL')) define('SIGKILL', 9);
+
 class SpoolerController extends Controller
 {
     private $defaultServiceName = 'yii2-spooler';
-    private $systemdUnit;
     private $serviceConfigFile;
     private $running = true;
     private $currentCommand = null;
     private $initialMemory = 0;
     private $echoProcessOutput = false;
 
-    private $maxMemoryLeak = 50;     // MB - limite massimo di leak consentito
-    private $maxCommandsBeforeRestart = 100;  // numero massimo di comandi prima del restart
+    // Limiti/contatori
+    private $maxMemoryLeak = 50;             // MB - limite massimo di leak consentito
+    private $maxCommandsBeforeRestart = 100; // numero massimo di comandi prima del restart
     private $restartMemoryThreshold = 50;    // MB - soglia di leak per forzare restart
     private $commandsExecuted = 0;
+
+    // Shutdown
     private $shouldExit = false;
     private $shutdownStartTime = null;
     private $shutdownTimeout = 10; // secondi, corrisponde al TimeoutStopSec di systemd
+
+    // Tail (ultimi N byte da mantenere in RAM per DB/email)
+    private $tailLimitBytes = 65536; // 64KB
 
     public function init()
     {
         parent::init();
         $this->serviceConfigFile = Yii::getAlias('@runtime/spooler-service.conf');
+        if (!gc_enabled()) {
+            gc_enable();
+        }
     }
 
     /**
@@ -51,25 +62,53 @@ class SpoolerController extends Controller
     }
 
     /**
-     * Scrive righe nel file di log (append, con lock per evitare interleaving).
+     * Apre un handle di log in append binario.
+     * @return resource|null
      */
-    private function appendLog(string $logFile, string $text): void
+    private function openLogHandle(string $logFile)
     {
         $fh = @fopen($logFile, 'ab');
         if ($fh) {
-            @flock($fh, LOCK_EX);
-            @fwrite($fh, $text);
-            if (substr($text, -1) !== "\n") {
-                @fwrite($fh, "\n");
-            }
-            @flock($fh, LOCK_UN);
-            @fclose($fh);
+            return $fh;
+        }
+        return null;
+    }
+
+    /**
+     * Scrive chunk su handle di log (senza rtrim per evitare copie).
+     */
+    private function writeLogChunk($handle, string $chunk): void
+    {
+        if (is_resource($handle) && $chunk !== '') {
+            @fwrite($handle, $chunk);
+        }
+    }
+
+    /**
+     * Scrive una riga singola con newline garantito.
+     */
+    private function writeLogLine($handle, string $line): void
+    {
+        if (substr($line, -1) !== "\n") {
+            $line .= "\n";
+        }
+        $this->writeLogChunk($handle, $line);
+    }
+
+    /**
+     * Mantiene solo la coda (ultimi N byte) in buffer.
+     */
+    private function keepTail(&$buffer, $chunk, $maxBytes)
+    {
+        $buffer .= $chunk;
+        $len = strlen($buffer);
+        if ($len > $maxBytes) {
+            $buffer = substr($buffer, $len - $maxBytes);
         }
     }
 
     /**
      * Stampa condizionale sulla console solo se esplicitamente abilitata per i comandi processati.
-     * (NON usiamo direttamente $this->stdout nella sezione comandi)
      */
     private function processEcho(string $line): void
     {
@@ -77,32 +116,26 @@ class SpoolerController extends Controller
             $this->stdout($line . (substr($line, -1) === "\n" ? '' : "\n"));
         }
     }
+
     /**
      * Check if we need to restart based on memory usage
      */
     private function shouldRestart($memory)
     {
-        // Verifica se abbiamo superato il numero massimo di comandi
         if ($this->commandsExecuted >= $this->maxCommandsBeforeRestart) {
             LogHelper::log("warning", "Reached maximum commands limit ({$this->maxCommandsBeforeRestart}). Triggering restart.");
             return true;
         }
-
-        // Verifica se il leak di memoria ha superato la soglia
         if ($memory['leak'] >= $this->restartMemoryThreshold) {
             LogHelper::log("warning", "Memory leak ({$memory['leak']}MB) exceeded threshold ({$this->restartMemoryThreshold}MB). Triggering restart.");
             return true;
         }
-
-        // Verifica se abbiamo superato il limite massimo di leak
         if ($memory['leak'] >= $this->maxMemoryLeak) {
             LogHelper::log("error", "Memory leak ({$memory['leak']}MB) exceeded maximum limit ({$this->maxMemoryLeak}MB). Emergency restart required.");
             return true;
         }
-
         return false;
     }
-
 
     /**
      * Perform a graceful restart
@@ -114,10 +147,6 @@ class SpoolerController extends Controller
         // Pulizia finale prima del restart
         $this->cleanupResources();
 
-        // Preparazione comando di restart
-        $scriptName = Yii::getAlias('@app/yii');
-        $command = $this->getServiceName();
-
         // Log dello stato finale prima del restart
         $finalMemory = $this->getMemoryUsage();
         LogHelper::log("info", "Final memory state before restart - Current: {$finalMemory['current']}MB, Leak: {$finalMemory['leak']}MB");
@@ -125,8 +154,6 @@ class SpoolerController extends Controller
         // Esegui il restart usando systemctl
         $serviceName = $this->getServiceName();
         LogHelper::log("info", "Requesting service restart through systemd...");
-
-        // Richiedi il restart del servizio
         exec("systemctl restart $serviceName > /dev/null 2>&1 &");
 
         // Termina il processo corrente
@@ -149,23 +176,23 @@ class SpoolerController extends Controller
         ];
     }
 
-
     /**
      * Clean up resources and memory
      */
     private function cleanupResources()
     {
-        // Clear PHP internal cache
         clearstatcache();
 
-        // Close any open database connections
-        Yii::$app->db->close();
+        // Chiudi connessioni DB
+        if (isset(Yii::$app->db)) {
+            Yii::$app->db->close();
+        }
 
-        // Force immediate garbage collection
+        // GC aggressiva
         gc_collect_cycles();
-
-        // Reset PHP's internal memory limit (if needed)
-        gc_mem_caches();
+        if (function_exists('gc_mem_caches')) {
+            gc_mem_caches();
+        }
     }
 
     /**
@@ -197,25 +224,24 @@ class SpoolerController extends Controller
             LogHelper::log("warning", "Shutdown timeout reached after {$elapsedTime} seconds. Forcing termination.");
             $this->stdout("\nShutdown timeout reached. Forcing termination...\n");
 
-            // Se c'è un processo attivo, terminalo
             if ($process && is_resource($process)) {
-                // Invia SIGTERM al processo
-                proc_terminate($process, SIGTERM);
+                // SIGTERM
+                @proc_terminate($process, SIGTERM);
 
-                // Aspetta brevemente che si chiuda
+                // attesa breve
                 $waitStart = time();
                 while (time() - $waitStart < 5) {
-                    $status = proc_get_status($process);
-                    if (!$status['running']) {
+                    $status = @proc_get_status($process);
+                    if (!$status || !$status['running']) {
                         break;
                     }
-                    usleep(100000); // 0.1 secondi
+                    usleep(100000);
                 }
 
-                // Se è ancora in esecuzione, forza la chiusura
-                $status = proc_get_status($process);
-                if ($status['running']) {
-                    proc_terminate($process, SIGKILL);
+                // forza chiusura
+                $status = @proc_get_status($process);
+                if ($status && $status['running']) {
+                    @proc_terminate($process, SIGKILL);
                 }
             }
 
@@ -231,7 +257,7 @@ class SpoolerController extends Controller
     private function getServiceName()
     {
         if (file_exists($this->serviceConfigFile)) {
-            return trim(file_get_contents($this->serviceConfigFile));
+            return trim(@file_get_contents($this->serviceConfigFile));
         }
         return $this->defaultServiceName;
     }
@@ -241,22 +267,9 @@ class SpoolerController extends Controller
      */
     private function saveServiceName($name)
     {
-        file_put_contents($this->serviceConfigFile, $name);
+        @file_put_contents($this->serviceConfigFile, $name);
     }
 
-
-    /**
-     * Write to log file in real-time
-     */
-    private function writeToLog($logFile, $content, $mode = 'a')
-    {
-        file_put_contents($logFile, $content . "\n", FILE_APPEND);
-    }
-
-    /**
-     * Process pending commands in the commands_spool table
-     * @return int Exit code
-     */
     /**
      * Process pending commands in the commands_spool table
      * @return int Exit code
@@ -265,9 +278,11 @@ class SpoolerController extends Controller
     {
         $this->initialMemory = memory_get_usage(true);
 
-        pcntl_async_signals(true);
-        pcntl_signal(SIGTERM, [$this, 'handleShutdown']);
-        pcntl_signal(SIGINT, [$this, 'handleShutdown']);
+        if (function_exists('pcntl_async_signals')) {
+            pcntl_async_signals(true);
+            pcntl_signal(SIGTERM, [$this, 'handleShutdown']);
+            pcntl_signal(SIGINT,  [$this, 'handleShutdown']);
+        }
 
         // Questi log usano LogHelper (log di controller/servizio), non stdout.
         LogHelper::log('info', 'Starting spool processing with memory limits:');
@@ -280,12 +295,12 @@ class SpoolerController extends Controller
 
         $conn = Yii::$app->db;
 
-        // Recupero comandi interrotti: se hanno logs_file valorizzato, provo a recuperarne la coda
+        // Recupero comandi interrotti: limita in RAM (tail)
         $res = $conn->createCommand('
-        SELECT * FROM commands_spool
-        WHERE completed = 0
-          AND executed_at IS NOT NULL
-    ')->queryAll();
+            SELECT * FROM commands_spool
+            WHERE completed = 0
+              AND executed_at IS NOT NULL
+        ')->queryAll();
 
         foreach ($res as $interrupted) {
             $logFile = $interrupted['logs_file'];
@@ -293,26 +308,27 @@ class SpoolerController extends Controller
             $logs = null;
 
             if ($logFile && is_readable($logFile)) {
-                $handle = fopen($logFile, 'r');
+                $handle = fopen($logFile, 'rb');
                 if ($handle) {
                     $startFound = false;
-                    $logsBuffer = [];
-                    while (($line = fgets($handle)) !== false) {
+                    $tail = '';
+                    while (!feof($handle)) {
+                        $chunk = fread($handle, 8192);
+                        if ($chunk === false) {
+                            break;
+                        }
                         if (!$startFound) {
-                            if (strpos($line, $targetStart) !== false) {
+                            if (strpos($chunk, $targetStart) !== false) {
                                 $startFound = true;
-                                $logsBuffer[] = $line;
+                                $this->keepTail($tail, $targetStart, $this->tailLimitBytes);
                             }
                         } else {
-                            $logsBuffer[] = $line;
-                            if (count($logsBuffer) > 1000) {
-                                break;
-                            }
+                            $this->keepTail($tail, $chunk, $this->tailLimitBytes);
                         }
                     }
                     fclose($handle);
                     if ($startFound) {
-                        $logs = implode('', $logsBuffer);
+                        $logs = $tail; // solo tail
                     }
                 }
             }
@@ -321,7 +337,8 @@ class SpoolerController extends Controller
             if ($spool) {
                 $spool->result = 'fatal';
                 $spool->completed = -1;
-                $spool->logs = "Informazioni recuperate dai log dopo la chiusura imprevista del processo: \n\n---------------------------------\n" . $logs;
+                $prefix = "Informazioni (tail) recuperate dai log dopo la chiusura imprevista del processo:\n\n---------------------------------\n";
+                $spool->logs = $prefix . ($logs !== null ? $logs : '[Nessuna coda trovata]');
                 $spool->save(false);
             }
         }
@@ -329,7 +346,7 @@ class SpoolerController extends Controller
         while ($this->running) {
             $iterationCount++;
 
-            // Monitoraggio memoria (solo su LogHelper, non stdout)
+            // Monitoraggio memoria
             $memory = $this->getMemoryUsage();
             $memoryChange = $lastMemory > 0 ? sprintf('(%+.2fMB)', $memory['current'] - $lastMemory) : '';
             $memoryInfo = sprintf(
@@ -346,7 +363,6 @@ class SpoolerController extends Controller
             // Restart safety
             if ($this->shouldRestart($memory)) {
                 LogHelper::log('warning', "Restart condition met after $iterationCount iterations.");
-                // NON scrivo su stdout, procedo direttamente al restart
                 $this->restartProcess();
             }
             $lastMemory = $memory['current'];
@@ -356,12 +372,12 @@ class SpoolerController extends Controller
 
             // Prendo prossimo comando pending
             $command = Yii::$app->db->createCommand('
-            SELECT * FROM commands_spool
-            WHERE completed = 0
-              AND executed_at IS NULL
-            ORDER BY created_at ASC
-            LIMIT 1
-        ')->queryOne();
+                SELECT * FROM commands_spool
+                WHERE completed = 0
+                  AND executed_at IS NULL
+                ORDER BY created_at ASC
+                LIMIT 1
+            ')->queryOne();
 
             if (!$command) {
                 if (!$this->running) {
@@ -372,6 +388,13 @@ class SpoolerController extends Controller
             }
 
             // ======= DA QUI IN POI: SEZIONE SILENZIOSA PER I COMANDI DELLO SPOOLER =======
+            $logHandle = null;
+            $tailStdout = '';
+            $tailStderr = '';
+            $logFile = null;
+            $startTime = time();
+            $loopBreakRequested = false; // <== flag per evitare break dentro finally
+
             try {
                 $this->currentCommand = $command;
 
@@ -382,7 +405,7 @@ class SpoolerController extends Controller
                     $spool->save(false);
                 }
 
-                // Risolvo log file (default + aggiornamento immediato nello spooler se non presente)
+                // Risolvo log file
                 $logFile = !empty($command['logs_file'])
                     ? $command['logs_file']
                     : Yii::getAlias("@runtime/logs/command_{$command['provenience']}_{$command['provenience_id']}.log");
@@ -396,12 +419,12 @@ class SpoolerController extends Controller
                     $spool->save(false);
                 }
 
-                // Niente stdout: traccio l’header direttamente nel file
-                $this->appendLog($logFile, "=== COMMAND EXECUTION START {$command['id']} ===");
-                $this->appendLog($logFile, $memoryInfo . "\n");
+                // Apro handle unico
+                $logHandle = $this->openLogHandle($logFile);
 
-                $stdout = '';
-                $stderr = '';
+                // Header nel file (newline garantiti)
+                $this->writeLogLine($logHandle, "=== COMMAND EXECUTION START {$command['id']} ===");
+                $this->writeLogLine($logHandle, $memoryInfo);
 
                 $descriptorspec = [
                     0 => ['pipe', 'r'],
@@ -419,14 +442,12 @@ class SpoolerController extends Controller
                     throw new \Exception('Failed to start process');
                 }
 
+                // non bloccare i pipe
                 stream_set_blocking($pipes[1], false);
                 stream_set_blocking($pipes[2], false);
 
-                $startTime = time();
-
-                // Loop di lettura: scrive SOLO su file, MAI su stdout
+                // Loop di lettura: scrive SOLO su file, mantiene TAIL minima in RAM
                 while (true) {
-                    // prima: gestione shutdown
                     if ($this->checkShutdownTimeout($process)) {
                         break;
                     }
@@ -437,10 +458,14 @@ class SpoolerController extends Controller
                     $result = @stream_select($reads, $writes, $excepts, 1);
 
                     if ($result === false && !$this->shouldExit) {
-                        // EINTR ecc: provo a continuare
                         continue;
                     }
                     if ($result === 0) {
+                        // nessun dato
+                        // verifica se i pipe sono chiusi
+                        if (feof($pipes[1]) && feof($pipes[2])) {
+                            break;
+                        }
                         continue;
                     }
 
@@ -453,11 +478,13 @@ class SpoolerController extends Controller
                         $done = false;
 
                         if ($pipe === $pipes[1]) {
-                            $stdout .= $chunk;
-                            $this->appendLog($logFile, rtrim($chunk, "\0"));
+                            // STDOUT
+                            $this->writeLogChunk($logHandle, $chunk);
+                            $this->keepTail($tailStdout, $chunk, $this->tailLimitBytes);
                         } else {
-                            $stderr .= $chunk;
-                            $this->appendLog($logFile, rtrim($chunk, "\0"));
+                            // STDERR
+                            $this->writeLogChunk($logHandle, $chunk);
+                            $this->keepTail($tailStderr, $chunk, $this->tailLimitBytes);
                         }
                     }
 
@@ -485,57 +512,61 @@ class SpoolerController extends Controller
                 $summary .= "Memory at end: Current: {$finalMemory['current']}MB, Real: {$finalMemory['current_real']}MB\n";
                 $summary .= 'Memory change during execution: ' . round($finalMemory['current'] - $memory['current'], 2) . "MB\n";
                 $summary .= "Total memory leak since start: {$finalMemory['leak']}MB\n";
-                $this->appendLog($logFile, $summary);
+                $this->writeLogChunk($logHandle, $summary);
 
-                // Se durante shutdown abbiamo sforato timeout, marchio fatal e STOP
+                // Se durante shutdown abbiamo sforato timeout, marchio fatal e chiedo uscita dal loop
                 if ($this->shouldExit && $this->checkShutdownTimeout()) {
                     if ($spool) {
                         $spool->completed = -1;
                         $spool->completed_at = new \yii\db\Expression('NOW()');
-                        $spool->logs = $stdout;
-                        $spool->errors = $stderr;
+                        $spool->logs = $tailStdout;  // solo TAIL
+                        $spool->errors = $tailStderr;
                         $spool->result = 'fatal';
-                        $spool->logs_file = $logFile; // già valorizzato prima, ma ok aggiornarlo
+                        $spool->logs_file = $logFile;
                         $spool->save(false);
                     }
                     $endtime = time();
                     $this->updateCronJob($command, $endtime - $startTime, 'ML');
-                    $this->sendErrorEmail($command['command'], 'Shutdown timeout reached', $stdout);
-                    $this->notification($command['command'], 'Shutdown timeout reached', $stdout);
-                    break;
+                    $this->sendErrorEmail($command['command'], 'Shutdown timeout reached', $tailStdout, $logFile, $tailStderr);
+                    $this->notification($command['command'], 'Shutdown timeout reached', $tailStdout, $logFile, $tailStderr);
+
+                    $loopBreakRequested = true; // <== NON break qui, lo faremo dopo il finally
+                } else {
+                    // Aggiornamento record spool di esito (solo tail)
+                    if ($spool) {
+                        $spool->completed = 1;
+                        $spool->completed_at = new \yii\db\Expression('NOW()');
+                        $spool->logs = $tailStdout;
+                        $spool->errors = $tailStderr;
+                        $spool->result = $returnValue === 0 ? 'success' : 'error';
+                        $spool->logs_file = $logFile;
+                        $spool->save(false);
+                    }
+
+                    $endtime = time();
+                    $executionTime = $endtime - $startTime;
+                    $exitCodeStr = $returnValue === 0 ? 'OK' : 'KO';
+                    $this->updateCronJob($command, $executionTime, $exitCodeStr);
+
+                    if ($exitCodeStr === 'KO') {
+                        $this->sendErrorEmail($command['command'], $tailStderr, $tailStdout, $logFile, $tailStderr);
+                        $this->notification($command['command'], $tailStderr, $tailStdout, $logFile, $tailStderr);
+                    }
+
+                    $this->commandsExecuted++;
+
+                    $postExecMemory = $this->getMemoryUsage();
+                    LogHelper::log('info', "Post-command memory - Current: {$postExecMemory['current']}MB, Leak: {$postExecMemory['leak']}MB");
                 }
 
-                // Aggiornamento record spool di esito (NB: NON scrivo nulla su stdout)
-                if ($spool) {
-                    $spool->completed = 1;
-                    $spool->completed_at = new \yii\db\Expression('NOW()');
-                    $spool->logs = $stdout;
-                    $spool->errors = $stderr;
-                    $spool->result = $returnValue === 0 ? 'success' : 'error';
-                    $spool->logs_file = $logFile;
-                    $spool->save(false);
-                }
-
-                $endtime = time();
-                $executionTime = $endtime - $startTime;
-                $exitCodeStr = $returnValue === 0 ? 'OK' : 'KO';
-                $this->updateCronJob($command, $executionTime, $exitCodeStr);
-
-                if ($exitCodeStr === 'KO') {
-                    $this->sendErrorEmail($command['command'], $stderr, $stdout);
-                    $this->notification($command['command'], $stderr, $stdout);
-                }
-
-                $this->commandsExecuted++;
-
-                $postExecMemory = $this->getMemoryUsage();
-                LogHelper::log('info', "Post-command memory - Current: {$postExecMemory['current']}MB, Leak: {$postExecMemory['leak']}MB");
-
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 LogHelper::log('error', "Error processing command {$command['id']}: " . $e->getMessage());
 
-                if (isset($logFile)) {
-                    $this->appendLog($logFile, "\n=== ERROR ===\n" . $e->getMessage());
+                if (is_resource($logHandle)) {
+                    $this->writeLogLine($logHandle, "\n=== ERROR ===");
+                    $this->writeLogLine($logHandle, $e->getMessage());
+                } elseif (isset($logFile)) {
+                    @file_put_contents($logFile, "\n=== ERROR ===\n" . $e->getMessage() . "\n", FILE_APPEND);
                 }
 
                 $spool = CommandsSpool::findOne($command['id']);
@@ -544,7 +575,6 @@ class SpoolerController extends Controller
                     $spool->completed_at = new \yii\db\Expression('NOW()');
                     $spool->errors = $e->getMessage();
                     $spool->result = 'error';
-                    // se avevo creato il default, rimane valorizzato
                     if (empty($spool->logs_file) && isset($logFile)) {
                         $spool->logs_file = $logFile;
                     }
@@ -553,20 +583,24 @@ class SpoolerController extends Controller
 
                 $endtime = time();
                 $this->updateCronJob($command, $endtime - $startTime, 'KO');
-                $this->sendErrorEmail($command['command'], $e->getMessage(), isset($stdout) ? $stdout : '');
-                $this->notification($command['command'], $e->getMessage(), isset($stdout) ? $stdout : '');
+                $this->sendErrorEmail($command['command'], $e->getMessage(), isset($tailStdout) ? $tailStdout : '', isset($logFile) ? $logFile : '(n/a)', isset($tailStderr) ? $tailStderr : '');
+                $this->notification($command['command'], $e->getMessage(), isset($tailStdout) ? $tailStdout : '', isset($logFile) ? $logFile : '(n/a)', isset($tailStderr) ? $tailStderr : '');
+
+            } finally {
+                // SOLO cleanup. NIENTE break/continue/return/exit qui (PHP 8.2)
+                if (is_resource($logHandle)) {
+                    fclose($logHandle);
+                }
+                $this->currentCommand = null;
+                unset($tailStdout, $tailStderr, $process, $pipes, $logHandle);
+                $this->cleanupResources();
             }
 
-            // Cleanup
-            $this->currentCommand = null;
-            unset($command, $stdout, $stderr, $process, $pipes);
-            $this->cleanupResources();
-
+            // === controllo loop DOPO il finally ===
             if ($this->checkShutdownTimeout()) {
                 break;
             }
-            if (!$this->running) {
-                // Non stampo su stdout, chiudo in silenzio la sezione di esecuzione
+            if ($loopBreakRequested || !$this->running) {
                 break;
             }
 
@@ -581,7 +615,6 @@ class SpoolerController extends Controller
         return ExitCode::OK;
     }
 
-
     /**
      * Clean up old completed commands
      * @param int $days Number of days to keep completed commands
@@ -594,14 +627,14 @@ class SpoolerController extends Controller
         $affected = Yii::$app->db->createCommand("
             DELETE FROM commands_spool 
             WHERE completed = 1 
-            AND completed_at < DATE_SUB(NOW(), INTERVAL :days DAY)
+              AND completed_at < DATE_SUB(NOW(), INTERVAL :days DAY)
         ", [':days' => $days])->execute();
 
         $this->stdout("Cleaned up $affected commands.\n");
         return ExitCode::OK;
     }
 
-    private function updateCronJob(array $command, int $seconds = null, $exit_code)
+    private function updateCronJob(array $command, int $seconds = null, $exit_code = null)
     {
         if ($command['provenience'] !== 'cron_job' || empty($command['provenience_id'])) {
             return;
@@ -614,32 +647,47 @@ class SpoolerController extends Controller
         LogHelper::log('info', "cron_job #{$command['provenience_id']} updated: time={$seconds}s");
     }
 
-    private function sendErrorEmail($command, $errorOutput, $executionOutput)
+    /**
+     * Invia email con solo tail + percorso del log completo.
+     * $errorOutputTail è usato come corpo errore (o messaggio di eccezione),
+     * $executionOutputTail è la tail di stdout; $logFile indica dove leggere il log completo.
+     */
+    private function sendErrorEmail($command, $errorOutputTail, $executionOutputTail, $logFile, $stderrTail = '')
     {
-        LogHelper::log("error", "SEND EMAIL TO ".Yii::$app->params['NotificationsEmail']." Error executing command: $command\nError output: $errorOutput\nExecution output: $executionOutput");
+        $to = isset(Yii::$app->params['NotificationsEmail']) ? Yii::$app->params['NotificationsEmail'] : null;
+        LogHelper::log("error", "SEND EMAIL TO ".$to." Error executing command: $command\nSTDERR (tail): $errorOutputTail\nSTDOUT (tail): $executionOutputTail\nLOG: $logFile");
+
+        $body = "Si è verificato un errore durante l'esecuzione del comando: $command\n\n"
+            . "Dettagli (TAIL):\n--- STDERR ---\n$errorOutputTail\n\n--- STDOUT ---\n$executionOutputTail\n\n"
+            . "Log completo: $logFile\n";
+
         Yii::$app->mailer->compose()
-            ->setTo(Yii::$app->params['NotificationsEmail'])
+            ->setTo($to)
             ->setFrom([Yii::$app->params['senderEmail'] => Yii::$app->name])
             ->setSubject('Errore di esecuzione del Cron Job ' . $command)
-            ->setTextBody("Si è verificato un errore durante l'esecuzione del comando: $command\n\nDettagli dell'errore:\n$errorOutput\n\nLog di esecuzione:\n$executionOutput")
+            ->setTextBody($body)
             ->send();
     }
 
-    private function notification($command,$errorOutput, $executionOutput){
-        LogHelper::log("error", "SEND NOTIFICATION SO Error executing command: $command\nError output: $errorOutput\nExecution output: $executionOutput");
-        $moduleID = $moduleID ?? Yii::$app->controller->module->id;
+    /**
+     * Notifica applicativa con solo tail + percorso del log completo.
+     */
+    private function notification($command, $errorOutputTail, $executionOutputTail, $logFile, $stderrTail = '')
+    {
+        LogHelper::log("error", "SEND NOTIFICATION SO Error executing command: $command\nSTDERR (tail): $errorOutputTail\nSTDOUT (tail): $executionOutputTail\nLOG: $logFile");
+        $moduleID = isset($moduleID) ? $moduleID : Yii::$app->controller->module->id;
         $module = Yii::$app->getModule($moduleID);
 
-        if ($module->has('customNotification')) {
+        if ($module && $module->has('customNotification')) {
             $notificationComponent = $module->get('customNotification');
             $title = "Errore esecuzione cronjob $command";
             $description = "Si è presentato un errore durante l'esecuzione del cronjob $command il " . date('d/m/Y') . ' alle ' . date('H:i:s');
 
-            $notificationComponent->send($title, $description, 'cron-jobs', 'error', "$command \n\n$errorOutput \n\n$executionOutput");
+            $payload = "Command: $command\n\n--- STDERR (tail) ---\n$errorOutputTail\n\n--- STDOUT (tail) ---\n$executionOutputTail\n\nLog completo: $logFile";
+            $notificationComponent->send($title, $description, 'cron-jobs', 'error', $payload);
         } else {
-            // Gestisci l'errore in un altro modo o ignoralo se il componente non è impostato
-            // Ad esempio, puoi scrivere un messaggio nel log dell'applicazione
-            //Yii::warning('Il componente di notifica personalizzato non è impostato nel modulo corrente.');
+            // opzionale: warning nel log app
+            // Yii::warning('Componente di notifica personalizzato non configurato.');
         }
     }
 }
