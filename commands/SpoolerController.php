@@ -41,12 +41,17 @@ class SpoolerController extends Controller
     private function ensureLogFile(string $logFile): void
     {
         $dir = dirname($logFile);
+        // PHP8 compatible: proper error handling instead of suppression
         if (!is_dir($dir)) {
-            @mkdir($dir, 0775, true);
+            if (!mkdir($dir, 0775, true) && !is_dir($dir)) {
+                throw new \RuntimeException(sprintf('Directory "%s" was not created', $dir));
+            }
         }
         if (!file_exists($logFile)) {
-            @touch($logFile);
-            @chmod($logFile, 0664);
+            if (!touch($logFile)) {
+                throw new \RuntimeException(sprintf('Log file "%s" could not be created', $logFile));
+            }
+            chmod($logFile, 0664);
         }
     }
 
@@ -55,15 +60,16 @@ class SpoolerController extends Controller
      */
     private function appendLog(string $logFile, string $text): void
     {
-        $fh = @fopen($logFile, 'ab');
+        // PHP8 compatible: proper error handling instead of suppression
+        $fh = fopen($logFile, 'ab');
         if ($fh) {
-            @flock($fh, LOCK_EX);
-            @fwrite($fh, $text);
+            flock($fh, LOCK_EX);
+            fwrite($fh, $text);
             if (substr($text, -1) !== "\n") {
-                @fwrite($fh, "\n");
+                fwrite($fh, "\n");
             }
-            @flock($fh, LOCK_UN);
-            @fclose($fh);
+            flock($fh, LOCK_UN);
+            fclose($fh);
         }
     }
 
@@ -198,7 +204,8 @@ class SpoolerController extends Controller
             $this->stdout("\nShutdown timeout reached. Forcing termination...\n");
 
             // Se c'è un processo attivo, terminalo
-            if ($process && is_resource($process)) {
+            // PHP8 compatible: proc_open returns Process object, not resource
+            if ($process && $process !== false) {
                 // Invia SIGTERM al processo
                 proc_terminate($process, SIGTERM);
 
@@ -415,7 +422,8 @@ class SpoolerController extends Controller
 
                 $process = proc_open('echo -1 | ' . $command['command'], $descriptorspec, $pipes, null, null);
 
-                if (!is_resource($process)) {
+                // PHP8 compatible: proc_open returns Process object or false
+                if ($process === false) {
                     throw new \Exception('Failed to start process');
                 }
 
@@ -467,8 +475,9 @@ class SpoolerController extends Controller
                 }
 
                 // Chiudo pipe
+                // PHP8 compatible: check pipes are valid before closing
                 foreach ($pipes as $pipe) {
-                    if (is_resource($pipe)) {
+                    if ($pipe !== false && is_resource($pipe)) {
                         fclose($pipe);
                     }
                 }
