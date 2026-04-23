@@ -1,0 +1,11 @@
+namespace: sharkom\cron\tests
+actor_suffix: Tester
+bootstrap: _bootstrap.php
+paths:
+    tests: .
+    output: _output
+    data: _data
+    support: _support
+settings:
+    colors: true
+    memory_limit: 512M
