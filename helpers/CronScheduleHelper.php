@@ -10,6 +10,7 @@ class CronScheduleHelper
 {
     private const CACHE_TTL = 1800;
     private const CACHE_PREFIX = 'cron_schedule_status:';
+    private const KEYS_INDEX = 'cron_schedule_status:_commands';
 
     /** @var callable|null test-only: sostituisce il lookup DB */
     private static $jobFinderOverride = null;
@@ -55,6 +56,37 @@ class CronScheduleHelper
         }
     }
 
+    /**
+     * Invalida tutte le chiavi di cache del helper. Chiamato da CronJob::afterSave/afterDelete.
+     * Usa l'indice delle chiavi note (self::KEYS_INDEX) per sapere quali alias invalidare —
+     * necessario perché Yii Redis cache hasha le chiavi e uno scan diretto non le trova.
+     */
+    public static function invalidateAll(): void
+    {
+        $cache = self::getCache();
+        if ($cache === null) {
+            return;
+        }
+        $commands = $cache->get(self::KEYS_INDEX) ?: [];
+        foreach ($commands as $cmd) {
+            $cache->delete(self::CACHE_PREFIX . $cmd);
+        }
+        $cache->delete(self::KEYS_INDEX);
+    }
+
+    private static function rememberKey(string $command): void
+    {
+        $cache = self::getCache();
+        if ($cache === null) {
+            return;
+        }
+        $commands = $cache->get(self::KEYS_INDEX) ?: [];
+        if (!in_array($command, $commands, true)) {
+            $commands[] = $command;
+            $cache->set(self::KEYS_INDEX, $commands, 0);
+        }
+    }
+
     private static function lookupCached(string $command): array
     {
         $key = self::CACHE_PREFIX . $command;
@@ -72,6 +104,7 @@ class CronScheduleHelper
 
         if ($cache !== null) {
             $cache->set($key, $raw, self::CACHE_TTL);
+            self::rememberKey($command);
         }
 
         return $raw;
