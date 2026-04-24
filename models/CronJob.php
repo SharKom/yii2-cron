@@ -88,6 +88,28 @@ class CronJob extends ActiveRecord
 
     /**
      * {@inheritdoc}
+     * Invalida la cache di CronScheduleHelper quando il job viene salvato
+     * (creato o modificato). Serve per propagare subito ai call-site cambi
+     * di schedule / active flag senza aspettare il TTL di 30 minuti.
+     */
+    public function afterSave($insert, $changedAttributes)
+    {
+        parent::afterSave($insert, $changedAttributes);
+        \sharkom\cron\helpers\CronScheduleHelper::invalidateAll();
+    }
+
+    /**
+     * {@inheritdoc}
+     * Stessa motivazione di afterSave.
+     */
+    public function afterDelete()
+    {
+        parent::afterDelete();
+        \sharkom\cron\helpers\CronScheduleHelper::invalidateAll();
+    }
+
+    /**
+     * {@inheritdoc}
      * @return CronJobQuery the active query used by this AR class.
      */
     public static function find()
