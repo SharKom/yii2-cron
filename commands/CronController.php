@@ -74,7 +74,7 @@ class CronController extends Controller
                 //echo "[" . date('Y-m-d H:i:s') . "] ". Console::ansiFormat("[info]", [Console::FG_GREEN]) . " - ".$job->id." - ".$job->name." - isDue". PHP_EOL;
                 //$this->run('/cron/job/run', [$job->id]);
                 $conn = Yii::$app->db;
-                $exists = $conn->createCommand("select * from commands_spool where command='$job->command' and completed=0 and executed_at is null")->queryOne();
+                $exists = $conn->createCommand("select * from commands_spool where command=:command and completed=0 and executed_at is null", [':command' => $job->command])->queryOne();
                 if (!$exists) {
                     $conn->createCommand()->insert('commands_spool', [
                         'command' => $job->command,
@@ -102,7 +102,7 @@ class CronController extends Controller
         $cronJobData = [];
         foreach ($result as $job) {
 
-            $cronJobName = $conn->createCommand("SELECT name FROM cron_job WHERE id=$job[job_id]")->queryScalar();
+            $cronJobName = $conn->createCommand("SELECT name FROM cron_job WHERE id=:id", [':id' => (int)$job['job_id']])->queryScalar();
             $cronJobData[] = [
                 'name' => $cronJobName,
                 'start' => $job['start'],
@@ -110,9 +110,9 @@ class CronController extends Controller
                 'runtime' => $job['runtime'],
                 'error_output' => $job['error_output'],
             ];
-            $result = $conn->createCommand("update cron_job set last_id=null where id=$job[job_id]")->execute();
+            $result = $conn->createCommand("update cron_job set last_id=null where id=:id", [':id' => (int)$job['job_id']])->execute();
 
-            $result = $conn->createCommand("delete from cron_job_run where id=$job[id]")->execute();
+            $result = $conn->createCommand("delete from cron_job_run where id=:id", [':id' => (int)$job['id']])->execute();
 
             /*
             if ($module->has('customNotification')) {
@@ -168,6 +168,6 @@ class CronController extends Controller
             $months = 3;
         }
 
-        $conn->createCommand("DELETE FROM commands_spool WHERE created_at IS NULL OR created_at < NOW() - INTERVAL $months MONTH;)")->execute();
+        $conn->createCommand("DELETE FROM commands_spool WHERE created_at IS NULL OR created_at < NOW() - INTERVAL " . (int)$months . " MONTH")->execute();
     }
 }

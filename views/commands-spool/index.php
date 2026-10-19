@@ -231,7 +231,10 @@ $gridColumn = array_merge($gridColumn, [
         'value' => function ($model) {
             if (!empty($model->provenience) && !empty($model->provenience_id)) {
                 $db = Yii::$app->db;
-                $cron = $db->createCommand("SELECT * FROM {$model->provenience} WHERE id = {$model->provenience_id}")->queryOne();
+                // solo i comandi nati da un cron job hanno una riga da cui leggere il nome
+                $cron = $model->provenience === 'cron_job'
+                    ? (new \yii\db\Query())->from('cron_job')->where(['id' => (int)$model->provenience_id])->one($db)
+                    : null;
                 if (!empty($cron)) {
                     return Html::a(
                         $cron["name"],
