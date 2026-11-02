@@ -8,22 +8,28 @@ use Codeception\Test\Unit;
 use DateTimeImmutable;
 use DateTimeZone;
 use Yii;
+use yii\db\Connection;
 use yii\db\Query;
 use yii\db\Transaction;
 
 require_once dirname(__DIR__, 2) . '/migrations/m261102_160100_schedule_purge_spool.php';
 
 /**
- * Migrazione che programma cron/maintenance/purge-spool: tre rami, idempotenza e down.
+ * Migrazione che programma cron/maintenance/purge-spool: tre rami
+ * (dispatcher, cron_job di yii2-cron, nessuno), idempotenza e down.
+ * Tutto in una transazione annullata in _after, su soundorgan_test.
  */
 final class SchedulePurgeSpoolMigrationTest extends Unit
 {
     private const MIGRAZIONE = \m261102_160100_schedule_purge_spool::class;
 
     private ?Transaction $transazione = null;
+    private $logLevel;
 
     protected function _before(): void
     {
+        $this->logLevel = Yii::$app->params['LogLevel'] ?? null;
+        Yii::$app->params['LogLevel'] = 'error';
         $this->transazione = Yii::$app->db->beginTransaction();
         ob_start();
     }
@@ -34,19 +40,23 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
         if ($this->transazione !== null && $this->transazione->isActive) {
             $this->transazione->rollBack();
         }
+        Yii::$app->params['LogLevel'] = $this->logLevel;
     }
 
-    private function migrazione(bool $conDispatcher = true, bool $conCron = true): \m261102_160100_schedule_purge_spool
-    {
-        return new class($conDispatcher, $conCron) extends \m261102_160100_schedule_purge_spool {
+    private function migrazione(
+        bool $conDispatcher = true,
+        bool $conCron = true,
+        ?Connection $db = null
+    ): \m261102_160100_schedule_purge_spool {
+        return new class($conDispatcher, $conCron, $db ?? Yii::$app->db) extends \m261102_160100_schedule_purge_spool {
             private bool $conDispatcher;
             private bool $conCron;
 
-            public function __construct(bool $conDispatcher, bool $conCron)
+            public function __construct(bool $conDispatcher, bool $conCron, Connection $db)
             {
                 $this->conDispatcher = $conDispatcher;
                 $this->conCron = $conCron;
-                parent::__construct(['db' => Yii::$app->db]);
+                parent::__construct(['db' => $db]);
             }
 
             protected function jobDispatcherAvailable(): bool
@@ -61,15 +71,15 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
         };
     }
 
-    private function job(): ?array
+    private function job(?Connection $db = null): ?array
     {
-        $job = (new Query())->from('system_jobs')->where(['name' => (self::MIGRAZIONE)::JOB_NAME])->one();
+        $job = (new Query())->from('system_jobs')->where(['name' => (self::MIGRAZIONE)::JOB_NAME])->one($db);
         return $job === false ? null : $job;
     }
 
-    private function definizioni(int $jobId): array
+    private function definizioni(int $jobId, ?Connection $db = null): array
     {
-        return (new Query())->from('schedule_definitions')->where(['system_job_id' => $jobId])->indexBy('rrule')->all();
+        return (new Query())->from('schedule_definitions')->where(['system_job_id' => $jobId])->indexBy('rrule')->all($db);
     }
 
     private function cronJob(): array
@@ -85,45 +95,100 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
 
         $job = $this->job();
         $this->assertNotNull($job);
-        // params e' una colonna JSON: a DB c'e' una stringa JSON che contiene il JSON
-        // (convenzione delle righe esistenti, vedi m260728_120041). Si legge come il
-        // dispatcher: typecast della colonna di Yii, poi un solo json_decode.
-        $params = Yii::$app->db->getTableSchema('system_jobs')->getColumn('params')->phpTypecast($job['params']);
+        $this->assertSame('console.run', $job['job_type_code']);
+        // params con un solo json_encode: la colonna e' json, il QueryBuilder aggiunge il
+        // secondo livello (JSON_TYPE=STRING come le righe esistenti). JobRunner la legge
+        // con ActiveRecord (Yii toglie un livello) e un solo json_decode.
+        $this->assertSame(
+            'STRING',
+            (new Query())->select('JSON_TYPE(params)')->from('system_jobs')->where(['id' => $job['id']])->scalar()
+        );
+        $rawParams = \sharkom\jobDispatcher\models\SystemJob::findOne($job['id'])->getAttribute('params');
         $this->assertSame(
             ['route' => 'cron/maintenance/purge-spool', 'args' => ['--optimize=1']],
-            json_decode($params, true)
+            json_decode($rawParams, true)
         );
         $this->assertSame(3600, (int) $job['catch_up_threshold_seconds']);
         $this->assertSame(1800, (int) $job['timeout']);
+        $this->assertSame('skip', $job['overlap_policy']);
 
         $definizioni = $this->definizioni((int) $job['id']);
         $this->assertEqualsCanonicalizing(
             ['FREQ=DAILY;BYHOUR=2;BYMINUTE=45;BYSECOND=0', 'FREQ=DAILY;COUNT=1'],
             array_keys($definizioni)
         );
-        $unica = $definizioni['FREQ=DAILY;COUNT=1'];
+        $this->assertStringContainsString('BYSECOND=0', (self::MIGRAZIONE)::RRULE_NOTTE);
+
+        $unica = $definizioni[(self::MIGRAZIONE)::RRULE_UNICA];
         $dtstart = (new DateTimeImmutable($unica['dtstart'], new DateTimeZone('Europe/Rome')))->getTimestamp();
         $this->assertGreaterThanOrEqual($prima + 115, $dtstart);
         $this->assertLessThanOrEqual(time() + 125, $dtstart);
 
+        // La schedule unica e' gia' materializzata: senza, il materializzatore notturno la perderebbe.
         $eventi = (new Query())->from('scheduled_events')->where(['schedule_definition_id' => $unica['id']])->all();
         $this->assertCount(1, $eventi);
+        $this->assertSame('pending', $eventi[0]['status']);
         $this->assertSame($unica['dtstart'], $eventi[0]['run_at']);
-        $this->assertSame([], $this->cronJob());
+
+        // La notturna resta al materializzatore delle 2:00.
+        $notte = $definizioni[(self::MIGRAZIONE)::RRULE_NOTTE];
+        $this->assertSame(
+            0,
+            (int) (new Query())->from('scheduled_events')->where(['schedule_definition_id' => $notte['id']])->count()
+        );
+
+        $this->assertSame([], $this->cronJob(), 'con il dispatcher non si crea il cron_job');
     }
 
-    public function testIdempotenteEDown(): void
+    public function testIdempotente(): void
     {
         $this->migrazione()->up();
         $this->migrazione()->up();
+
+        $this->assertSame(1, (int) (new Query())->from('system_jobs')->where(['name' => (self::MIGRAZIONE)::JOB_NAME])->count());
         $job = $this->job();
         $this->assertCount(2, $this->definizioni((int) $job['id']));
         $this->assertSame(1, (int) (new Query())->from('scheduled_events')->where(['system_job_id' => $job['id']])->count());
+    }
 
-        $this->migrazione()->down();
+    public function testConConnessioneDiversaDaQuellaDellAppNonMaterializza(): void
+    {
+        // Stesso DB di test, ma un oggetto Connection diverso da Yii::$app->db
+        // (come `migrate --db=<altro>`): il Materializer scriverebbe sul DB dell'app.
+        $altra = new Connection([
+            'dsn' => Yii::$app->db->dsn,
+            'username' => Yii::$app->db->username,
+            'password' => Yii::$app->db->password,
+            'charset' => Yii::$app->db->charset,
+        ]);
+        $transazione = $altra->beginTransaction();
+        try {
+            $this->migrazione(true, true, $altra)->up();
+
+            $job = $this->job($altra);
+            $this->assertNotNull($job);
+            $definizioni = $this->definizioni((int) $job['id'], $altra);
+            $this->assertCount(2, $definizioni);
+            $this->assertSame(
+                0,
+                (int) (new Query())->from('scheduled_events')->where(['system_job_id' => $job['id']])->count('*', $altra)
+            );
+        } finally {
+            $transazione->rollBack();
+            $altra->close();
+        }
+    }
+
+    public function testDownRimuoveJobESchedule(): void
+    {
+        $this->migrazione()->up();
+        $jobId = (int) $this->job()['id'];
+
+        $this->assertNotFalse($this->migrazione()->down());
 
         $this->assertNull($this->job());
-        $this->assertSame([], $this->definizioni((int) $job['id']));
+        $this->assertSame([], $this->definizioni($jobId));
+        $this->assertSame(0, (int) (new Query())->from('scheduled_events')->where(['system_job_id' => $jobId])->count());
     }
 
     public function testSenzaDispatcherCreaIlCronJobGiornaliero(): void
@@ -134,17 +199,21 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
         $righe = $this->cronJob();
         $this->assertCount(1, $righe);
         $this->assertSame('45 2 * * *', $righe[0]['schedule']);
+        $this->assertSame(1, (int) $righe[0]['active']);
         $this->assertStringStartsWith(PHP_BINARY . ' ', $righe[0]['command']);
         $this->assertStringEndsWith('yii cron/maintenance/purge-spool --optimize=1', $righe[0]['command']);
+        $this->assertNull($this->job());
 
-        $this->migrazione(false, true)->down();
+        $this->assertNotFalse($this->migrazione(false, true)->down());
         $this->assertSame([], $this->cronJob());
     }
 
     public function testSenzaDispatcherNeCronNessunaAzione(): void
     {
         $this->assertTrue($this->migrazione(false, false)->up());
+
         $this->assertNull($this->job());
         $this->assertSame([], $this->cronJob());
+        $this->assertNotFalse($this->migrazione(false, false)->down());
     }
 }

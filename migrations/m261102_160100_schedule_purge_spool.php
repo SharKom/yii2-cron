@@ -22,14 +22,17 @@ use yii\db\Query;
  * deploy, l'esecuzione unica parte se riparte entro un'ora; oltre ci pensa la notte);
  * overlap_policy = skip; max_retries = 0 (il retry e' la notte dopo); timeout = 1800
  * (20 minuti di cancellazione piu' la ricostruzione); internal = 0 (visibile in
- * calendario).
+ * calendario). RRULE notturna con BYSECOND=0: senza, php-rrule erediterebbe i
+ * secondi del dtstart.
  *
  * ENCODING di params: json_encode SINGOLO (vedi m260728_120041).
  *
- * Niente transazione (up(), non safeUp()): il Materializer sveglia il dispatcher via
+ * Niente transazione in up() (non safeUp()): il Materializer sveglia il dispatcher via
  * Redis appena inserito l'evento, e dentro una transazione aperta il dispatcher non
  * lo vedrebbe. Ogni passo e' idempotente: job per nome, schedule per rrule, cron_job
  * per comando. Non fa mai fallire il deploy per la materializzazione: scrive un avviso.
+ * La materializzazione avviene solo se la connessione della migrazione e'
+ * Yii::$app->db (il Materializer legge la definition con ActiveRecord).
  */
 class m261102_160100_schedule_purge_spool extends Migration
 {
@@ -60,11 +63,12 @@ class m261102_160100_schedule_purge_spool extends Migration
         return true;
     }
 
-    public function down()
+    public function safeDown()
     {
         if ($this->jobDispatcherAvailable()) {
             $jobId = (int) $this->findJobId();
             if ($jobId) {
+                // Gli scheduled_events del job spariscono in cascata con system_jobs.
                 $this->delete('{{%schedule_definitions}}', ['system_job_id' => $jobId]);
                 $this->delete('{{%system_jobs}}', ['id' => $jobId]);
             }
