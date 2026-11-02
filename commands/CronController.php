@@ -64,7 +64,8 @@ class CronController extends Controller
     public function actionRun()
     {
         //$this->unlock();
-        $this->purgeLogs();
+        // La pulizia di commands_spool non e' piu' qui (era una DELETE senza LIMIT ogni
+        // minuto che cancellava anche le righe pendenti): vedi cron/maintenance/purge-spool.
 
         foreach (CronJob::findRunnable() as $job) {
 
@@ -86,8 +87,6 @@ class CronController extends Controller
                 }
             }
         }
-
-        //$this->purgeLogs();
     }
 
 
@@ -155,19 +154,5 @@ class CronController extends Controller
             ->setSubject($subject)
             ->setTextBody($body)
             ->send();
-    }
-
-    private function purgeLogs()
-    {
-        $conn = Yii::$app->db;
-        $module = Yii::$app->getModule(Yii::$app->controller->module->id);
-
-        if (isset($module->params['purge_log_interval'])) {
-            $months = $module->params['purge_log_interval'];
-        } else {
-            $months = 3;
-        }
-
-        $conn->createCommand("DELETE FROM commands_spool WHERE created_at IS NULL OR created_at < NOW() - INTERVAL " . (int)$months . " MONTH")->execute();
     }
 }

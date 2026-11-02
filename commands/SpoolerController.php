@@ -616,8 +616,10 @@ class SpoolerController extends Controller
     }
 
     /**
-     * Clean up old completed commands
-     * @param int $days Number of days to keep completed commands
+     * Pulizia manuale delle righe concluse (completed = 1) piu' vecchie di N giorni.
+     * Non schedulata: la pulizia automatica e' cron/maintenance/purge-spool (a blocchi,
+     * con i file di log e l'ottimizzazione della tabella). Resta come alternativa manuale.
+     * @param int $days giorni da tenere
      * @return int Exit code
      */
     public function actionCleanup($days = 30)

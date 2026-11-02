@@ -13,13 +13,22 @@ Forked from vasadibt/yii2-cron with some modifications:
 
 ChangeLog 27/Feb/2023
 1. Add Manual Run button on cronjob page
-2. Add auto purge logs (use module param purge_log_interval | default 3 months)
+2. Add auto purge logs (use module param purge_log_interval | default 3 months) - removed on 2/Nov/2026, see below
 3. Fix some graphics in logs pages
 
 ChangeLog 5/May/2023
 1. Added execution error mail notifications
 2. Added auto unlock mail notifications
 3. Added module param sendNotifications
+
+ChangeLog 2/Nov/2026
+1. Removed the purge of commands_spool from every cron/cron/run (purge_log_interval)
+2. New command: php yii cron/maintenance/purge-spool [--days=14] [--optimize=1] [--max-seconds=1200]
+   - deletes in blocks of 5,000 only finished rows (completed <> 0) older than the retention
+   - removes the command log files only inside @runtime/logs and only when no remaining row uses them
+   - with --optimize=1 rebuilds the table online (ALGORITHM=INPLACE, LOCK=NONE) above the thresholds
+3. Module param purge_spool_days (days, default 14) replaces purge_log_interval (months, converted x 30 with a deprecation warning)
+4. Migration migrations/m261102_160100_schedule_purge_spool.php: nightly job (job dispatcher) or cron_job "45 2 * * *"
 
 Installation
 ------------
