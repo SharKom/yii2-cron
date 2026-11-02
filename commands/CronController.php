@@ -118,6 +118,12 @@ class CronController extends Controller
         try {
             $result = $this->createFallbackPurger()->purgeOncePerDay($this->fallbackMarkerFile(), $days, self::FALLBACK_MAX_SECONDS);
         } catch (\Throwable $e) {
+            // Un drain del dispatcher (SIGTERM) deve risalire fino al JobRunner come
+            // "interrupted", non finire nel log come errore. instanceof e' sicuro anche se
+            // la classe del dispatcher non esiste (NormaFlow).
+            if ($e instanceof \sharkom\jobDispatcher\services\InterruptedException) {
+                throw $e;
+            }
             LogHelper::log('error', 'commands_spool: pulizia semplice non riuscita: ' . $e->getMessage(), SpoolFallbackPurger::LOG_CATEGORY);
             return;
         }

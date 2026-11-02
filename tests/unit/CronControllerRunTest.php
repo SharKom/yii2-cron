@@ -116,6 +116,36 @@ final class CronControllerRunTest extends Unit
         $this->assertFileDoesNotExist($marcatore);
     }
 
+    public function testInterruzioneDelDispatcherNelRipiegoRisale(): void
+    {
+        if (!class_exists(\sharkom\jobDispatcher\services\InterruptedException::class)) {
+            $this->markTestSkipped('job dispatcher non installato');
+        }
+        Yii::$app->db->createCommand()->update('cron_job', ['active' => 0])->execute();
+        $purger = new class(Yii::$app->db) extends SpoolFallbackPurger {
+            public function purgeOncePerDay(string $markerFile, int $days, int $maxSeconds = 0, ?DateTimeImmutable $now = null): ?array
+            {
+                throw new \sharkom\jobDispatcher\services\InterruptedException('SIGTERM durante il drain');
+            }
+        };
+        $comando = new class('cron', Yii::$app->getModule('cron'), ['purger' => $purger]) extends CronController {
+            public ?SpoolFallbackPurger $purger = null;
+
+            protected function maintenanceAvailable(): bool
+            {
+                return false;
+            }
+
+            protected function createFallbackPurger(): SpoolFallbackPurger
+            {
+                return $this->purger;
+            }
+        };
+
+        $this->expectException(\sharkom\jobDispatcher\services\InterruptedException::class);
+        $comando->actionRun();
+    }
+
     public function testRipiegoDaRunAlMassimo60Secondi(): void
     {
         $marcatore = sys_get_temp_dir() . '/spool-fallback-run-' . getmypid() . '-' . bin2hex(random_bytes(3)) . '.date';
