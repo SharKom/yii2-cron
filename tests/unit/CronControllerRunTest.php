@@ -179,7 +179,11 @@ final class CronControllerRunTest extends Unit
             }
         };
 
-        $comando->actionRun();
+        try {
+            $comando->actionRun();
+        } finally {
+            @unlink($marcatore);
+        }
 
         $this->assertSame(60, $purger->maxSecondi);
         $this->assertSame(60, CronController::FALLBACK_MAX_SECONDS);
