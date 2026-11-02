@@ -71,8 +71,28 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
         };
     }
 
+    /**
+     * Il ramo dispatcher si prova solo dove il job dispatcher c'e' (SoundOrgan): sul core
+     * NormaFlow mancano la classe e le tabelle e quei test vengono saltati.
+     */
+    private function richiedeDispatcher(): void
+    {
+        if (!class_exists(\sharkom\jobDispatcher\models\SystemJob::class)) {
+            $this->markTestSkipped('job dispatcher non installato (classe SystemJob assente)');
+        }
+        $tabelle = Yii::$app->db->schema->getTableNames('', true);
+        foreach (['system_jobs', 'system_job_types', 'schedule_definitions', 'scheduled_events'] as $tabella) {
+            if (!in_array($tabella, $tabelle, true)) {
+                $this->markTestSkipped("job dispatcher non installato (tabella {$tabella} assente)");
+            }
+        }
+    }
+
     private function job(?Connection $db = null): ?array
     {
+        if (($db ?? Yii::$app->db)->getTableSchema('system_jobs') === null) {
+            return null;
+        }
         $job = (new Query())->from('system_jobs')->where(['name' => (self::MIGRAZIONE)::JOB_NAME])->one($db);
         return $job === false ? null : $job;
     }
@@ -89,6 +109,7 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
 
     public function testConDispatcherCreaJobNotturnoEdEsecuzioneUnicaMaterializzata(): void
     {
+        $this->richiedeDispatcher();
         $prima = time();
 
         $this->migrazione()->up();
@@ -142,6 +163,7 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
 
     public function testIdempotente(): void
     {
+        $this->richiedeDispatcher();
         $this->migrazione()->up();
         $this->migrazione()->up();
 
@@ -153,6 +175,7 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
 
     public function testConConnessioneDiversaDaQuellaDellAppNonMaterializza(): void
     {
+        $this->richiedeDispatcher();
         // Stesso DB di test, ma un oggetto Connection diverso da Yii::$app->db
         // (come `migrate --db=<altro>`): il Materializer scriverebbe sul DB dell'app.
         $altra = new Connection([
@@ -181,6 +204,7 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
 
     public function testDownRimuoveJobESchedule(): void
     {
+        $this->richiedeDispatcher();
         $this->migrazione()->up();
         $jobId = (int) $this->job()['id'];
 
