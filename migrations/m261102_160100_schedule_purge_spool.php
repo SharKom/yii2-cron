@@ -208,7 +208,7 @@ class m261102_160100_schedule_purge_spool extends Migration
 
     protected function jobDispatcherAvailable(): bool
     {
-        $tables = $this->db->schema->getTableNames();
+        $tables = $this->db->schema->getTableNames('', true);
         return in_array('system_jobs', $tables, true)
             && in_array('schedule_definitions', $tables, true)
             && in_array('system_job_types', $tables, true)

@@ -240,4 +240,24 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
         $this->assertSame([], $this->cronJob());
         $this->assertNotFalse($this->migrazione(false, false)->down());
     }
+
+    public function testDispatcherRilevatoAncheConElencoDelleTabelleVecchioInMemoria(): void
+    {
+        $this->richiedeDispatcher();
+        // Migration::init() aggiorna lo schema, ma tra la costruzione e up() l'elenco delle
+        // tabelle in memoria puo' essere vecchio: senza refresh il dispatcher non si vedrebbe.
+        $migrazione = $this->migrazione();
+        $schema = Yii::$app->db->getSchema();
+        $elenco = new \ReflectionProperty(\yii\db\Schema::class, '_tableNames');
+        $prima = $elenco->getValue($schema);
+        $elenco->setValue($schema, ['' => ['cron_job']]);
+        try {
+            $migrazione->up();
+        } finally {
+            $elenco->setValue($schema, $prima);
+        }
+
+        $this->assertNotNull($this->job(), 'il ramo dispatcher legge l\'elenco delle tabelle aggiornato');
+        $this->assertSame([], $this->cronJob());
+    }
 }
