@@ -129,7 +129,7 @@ class CronController extends Controller
         }
         LogHelper::log(
             'info',
-            "commands_spool: cancellate {$result['deleted']} righe precedenti a {$result['cutoff']} in {$result['batches']} blocchi (pulizia semplice giornaliera)",
+            SpoolFallbackPurger::summary($result, 'pulizia semplice giornaliera'),
             SpoolFallbackPurger::LOG_CATEGORY
         );
     }

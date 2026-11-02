@@ -57,9 +57,10 @@ class MaintenanceController extends Controller
             return $this->purgeWithFallback($days);
         }
 
-        $report = $this->createService()->run($days, (bool) (int) $this->optimize, (int) $this->maxSeconds);
+        $service = $this->createService();
+        $report = $service->run($days, (bool) (int) $this->optimize, (int) $this->maxSeconds);
 
-        $this->stdout($report->summary() . "\n");
+        $this->stdout($service->summary($report) . "\n");
         // Ottimizzazione rinviata, sotto soglia, senza lock o senza spazio: esito 0, si
         // riprova la notte dopo. Solo un errore vero (es. ALTER fallito) da' 1.
         return $report->isError() ? ExitCode::UNSPECIFIED_ERROR : ExitCode::OK;
@@ -80,8 +81,7 @@ class MaintenanceController extends Controller
         $result = (new SpoolFallbackPurger())->purge($days, (int) $this->maxSeconds);
         SpoolFallbackPurger::markDone($this->fallbackMarkerFile());
 
-        $summary = "commands_spool: cancellate {$result['deleted']} righe precedenti a {$result['cutoff']} in {$result['batches']} blocchi (pulizia semplice)"
-            . ($result['stoppedByTime'] ? ', tempo massimo raggiunto: il resto alla prossima esecuzione' : '');
+        $summary = SpoolFallbackPurger::summary($result, 'pulizia semplice');
         LogHelper::log('info', $summary, SpoolFallbackPurger::LOG_CATEGORY);
         $this->stdout($summary . "\n");
         return ExitCode::OK;

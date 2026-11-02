@@ -194,4 +194,17 @@ final class SpoolFallbackPurgerTest extends Unit
         $this->assertNull($purger->purgeOncePerDay($marcatore, 14, 0, new DateTimeImmutable('2026-11-03 00:01:00')));
         $this->assertCount(2, $purger->avvisi, 'di nuovo il giorno dopo');
     }
+
+    public function testContaLePendentiOltreLaSogliaSenzaCancellarle(): void
+    {
+        $vecchiaPendente = $this->riga(self::VECCHIA, 0);
+        $this->riga(null, 0);
+        $this->riga(self::RECENTE, 0);
+
+        $esito = $this->purger()->purge(14, 0, new DateTimeImmutable(self::ADESSO));
+
+        $this->assertSame(2, $esito['pendingOld']);
+        $this->assertTrue($this->esiste($vecchiaPendente));
+        $this->assertStringContainsString('righe pendenti precedenti alla soglia 2 (non cancellate)', SpoolFallbackPurger::summary($esito, 'prova'));
+    }
 }

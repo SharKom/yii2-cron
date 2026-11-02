@@ -181,4 +181,20 @@ final class SpoolRetentionServiceTest extends Unit
         $this->assertSame(501, $report->purge->deleted);
         $this->assertSame(2, $report->purge->batches);
     }
+
+    public function testContaLePendentiOltreLaSogliaSenzaCancellarle(): void
+    {
+        $vecchiaPendente = $this->riga(self::VECCHIA, 0);
+        $senzaDataPendente = $this->riga(null, 0);
+        $this->riga(self::RECENTE, 0);
+        $this->riga(self::VECCHIA, 1);
+
+        $servizio = $this->servizio();
+        $report = $servizio->run(14, false, 60, new DateTimeImmutable(self::ADESSO));
+
+        $this->assertSame(2, $servizio->pendingOld);
+        $this->assertTrue($this->esiste($vecchiaPendente));
+        $this->assertTrue($this->esiste($senzaDataPendente));
+        $this->assertStringContainsString('righe pendenti precedenti alla soglia 2 (non cancellate)', $servizio->summary($report));
+    }
 }

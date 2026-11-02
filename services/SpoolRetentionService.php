@@ -35,6 +35,9 @@ class SpoolRetentionService
      */
     public const BATCH_SIZE = 500;
 
+    /** Righe pendenti precedenti alla soglia dell'ultima run(): contate, mai cancellate. */
+    public int $pendingOld = 0;
+
     private Connection $db;
     private TableRetention $retention;
     private string $logDir;
@@ -87,9 +90,16 @@ class SpoolRetentionService
             }
         );
         $report->filesRemoved = $this->removeUnreferencedFiles(array_keys($candidates));
+        $this->pendingOld = SpoolFallbackPurger::countPendingOld($this->db, $cutoff);
 
-        LogHelper::log($report->isError() ? 'error' : 'info', $report->summary(), self::LOG_CATEGORY);
+        LogHelper::log($report->isError() ? 'error' : 'info', $this->summary($report), self::LOG_CATEGORY);
         return $report;
+    }
+
+    /** Riepilogo del report piu' le righe pendenti oltre la soglia (le pendenti orfane si vedono). */
+    public function summary(RetentionReport $report): string
+    {
+        return $report->summary() . ", righe pendenti precedenti alla soglia {$this->pendingOld} (non cancellate)";
     }
 
     /** True se $path e' un file regolare dentro la cartella dei log (realpath). */

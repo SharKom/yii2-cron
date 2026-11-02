@@ -79,7 +79,7 @@ class SpoolFallbackPurger
 
     /**
      * @param int $maxSeconds tempo massimo; 0 o negativo = nessun limite
-     * @return array{deleted:int, batches:int, stoppedByTime:bool, cutoff:string}
+     * @return array{deleted:int, batches:int, stoppedByTime:bool, cutoff:string, pendingOld:int}
      */
     public function purge(int $days, int $maxSeconds = 0, ?DateTimeImmutable $now = null): array
     {
@@ -88,7 +88,7 @@ class SpoolFallbackPurger
         }
         $cutoff = ($now ?? new DateTimeImmutable())->modify("-{$days} days")->format('Y-m-d H:i:s');
         $condition = ['and', ['<>', 'completed', 0], ['or', ['<', 'created_at', $cutoff], ['created_at' => null]]];
-        $result = ['deleted' => 0, 'batches' => 0, 'stoppedByTime' => false, 'cutoff' => $cutoff];
+        $result = ['deleted' => 0, 'batches' => 0, 'stoppedByTime' => false, 'cutoff' => $cutoff, 'pendingOld' => 0];
         $start = microtime(true);
 
         while (true) {
@@ -114,7 +114,28 @@ class SpoolFallbackPurger
             }
         }
 
+        $result['pendingOld'] = self::countPendingOld($this->db, $cutoff);
         return $result;
+    }
+
+    /**
+     * Righe pendenti (completed = 0) create prima della soglia o senza created_at: non si
+     * cancellano mai, ma si contano nel riepilogo per far vedere le pendenti orfane.
+     */
+    public static function countPendingOld(Connection $db, string $cutoff): int
+    {
+        return (int) (new Query())
+            ->from(self::TABLE)
+            ->where(['and', ['completed' => 0], ['or', ['<', 'created_at', $cutoff], ['created_at' => null]]])
+            ->count('*', $db);
+    }
+
+    /** Riga di riepilogo per log e console. */
+    public static function summary(array $result, string $label): string
+    {
+        return "commands_spool: cancellate {$result['deleted']} righe precedenti a {$result['cutoff']} in {$result['batches']} blocchi ({$label})"
+            . ", righe pendenti precedenti alla soglia {$result['pendingOld']} (non cancellate)"
+            . ($result['stoppedByTime'] ? ', tempo massimo raggiunto: il resto alla prossima esecuzione' : '');
     }
 
     /**
@@ -138,7 +159,7 @@ class SpoolFallbackPurger
      * dell'ultima pulizia. Se un altro processo sta gia' pulendo (lock sul marcatore) o
      * oggi e' gia' stato fatto, non fa nulla e restituisce null.
      *
-     * @return array{deleted:int, batches:int, stoppedByTime:bool, cutoff:string}|null
+     * @return array{deleted:int, batches:int, stoppedByTime:bool, cutoff:string, pendingOld:int}|null
      */
     public function purgeOncePerDay(string $markerFile, int $days, int $maxSeconds = 0, ?DateTimeImmutable $now = null): ?array
     {
