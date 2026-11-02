@@ -169,4 +169,29 @@ final class SpoolFallbackPurgerTest extends Unit
         $this->assertTrue($this->esiste($pendente), 'la DELETE ripete completed <> 0');
         $this->assertSame(1, $esito['deleted']);
     }
+
+    public function testMarcatoreNonApribileDaUnAvvisoAlGiorno(): void
+    {
+        // Cartella inesistente: fopen fallisce come con un file creato da root.
+        $marcatore = sys_get_temp_dir() . '/spool-fallback-nodir-' . bin2hex(random_bytes(4)) . '/marcatore.date';
+        $vecchia = $this->riga(self::VECCHIA, 1);
+        $purger = new class(Yii::$app->db) extends SpoolFallbackPurger {
+            /** @var string[] */
+            public array $avvisi = [];
+
+            protected function warn(string $message): void
+            {
+                $this->avvisi[] = $message;
+            }
+        };
+
+        $this->assertNull($purger->purgeOncePerDay($marcatore, 14, 0, new DateTimeImmutable(self::ADESSO)));
+        $this->assertNull($purger->purgeOncePerDay($marcatore, 14, 0, new DateTimeImmutable('2026-11-02 18:00:00')));
+        $this->assertCount(1, $purger->avvisi, 'un solo avviso nello stesso giorno');
+        $this->assertStringContainsString($marcatore, $purger->avvisi[0]);
+        $this->assertTrue($this->esiste($vecchia), 'senza marcatore niente pulizia');
+
+        $this->assertNull($purger->purgeOncePerDay($marcatore, 14, 0, new DateTimeImmutable('2026-11-03 00:01:00')));
+        $this->assertCount(2, $purger->avvisi, 'di nuovo il giorno dopo');
+    }
 }

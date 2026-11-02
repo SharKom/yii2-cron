@@ -6,6 +6,7 @@ namespace sharkom\cron\services;
 
 use DateTimeImmutable;
 use InvalidArgumentException;
+use sharkom\devhelper\LogHelper;
 use Yii;
 use yii\db\Connection;
 use yii\db\Query;
@@ -36,6 +37,14 @@ class SpoolFallbackPurger
     public int $batchSize = 500;
     /** Pausa tra i blocchi, in millisecondi. */
     public int $pauseMs = 100;
+
+    /**
+     * Giorno dell'ultimo avviso per marcatore non apribile, per file (in memoria): al
+     * massimo un avviso al giorno per processo.
+     *
+     * @var array<string, string>
+     */
+    private static array $markerWarnedOn = [];
 
     private Connection $db;
 
@@ -136,6 +145,13 @@ class SpoolFallbackPurger
         $now = $now ?? new DateTimeImmutable();
         $handle = @fopen($markerFile, 'c+');
         if ($handle === false) {
+            // Senza marcatore il ripiego non gira: lo si dice nel log (es. file creato da
+            // root), una volta al giorno per non riempirlo a ogni cron/cron/run.
+            $today = $now->format('Y-m-d');
+            if ((self::$markerWarnedOn[$markerFile] ?? null) !== $today) {
+                self::$markerWarnedOn[$markerFile] = $today;
+                $this->warn("commands_spool: file marcatore {$markerFile} non apribile, pulizia semplice giornaliera non eseguita");
+            }
             return null;
         }
         try {
@@ -159,6 +175,7 @@ class SpoolFallbackPurger
     {
         $handle = @fopen($markerFile, 'c+');
         if ($handle === false) {
+            LogHelper::log('warning', "commands_spool: file marcatore {$markerFile} non apribile, pulizia del giorno non segnata", self::LOG_CATEGORY);
             return;
         }
         if (flock($handle, LOCK_EX)) {
@@ -166,6 +183,12 @@ class SpoolFallbackPurger
             flock($handle, LOCK_UN);
         }
         fclose($handle);
+    }
+
+    /** Avviso nel log (sostituibile nei test). */
+    protected function warn(string $message): void
+    {
+        LogHelper::log('warning', $message, self::LOG_CATEGORY);
     }
 
     /** @param resource $handle */
