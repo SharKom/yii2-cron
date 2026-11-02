@@ -23,6 +23,9 @@
     "kartik-v/yii2-grid": "@dev",
     "sharkom/yii2-cronjob-widget": "^1"
   },
+  "suggest": {
+    "sharkom/yii2-dev-helper": "Classes sharkom\\devhelper\\maintenance for the full purge of commands_spool (log files and online table rebuild); without them cron/maintenance/purge-spool uses the simple purge"
+  },
   "autoload": {
     "psr-4": {
       "sharkom\\cron\\": ""
