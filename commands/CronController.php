@@ -33,6 +33,12 @@ class CronController extends Controller
     public $defaultAction = 'jobs';
 
     /**
+     * Tempo massimo della pulizia semplice chiamata da cron/cron/run (solo senza le classi
+     * di manutenzione): breve, il run gira ogni minuto. Il resto il giorno dopo.
+     */
+    public const FALLBACK_MAX_SECONDS = 60;
+
+    /**
      * List all jobs
      * @throws \Exception
      */
@@ -110,7 +116,7 @@ class CronController extends Controller
             return;
         }
         try {
-            $result = (new SpoolFallbackPurger())->purgeOncePerDay($this->fallbackMarkerFile(), $days, 300);
+            $result = $this->createFallbackPurger()->purgeOncePerDay($this->fallbackMarkerFile(), $days, self::FALLBACK_MAX_SECONDS);
         } catch (\Throwable $e) {
             LogHelper::log('error', 'commands_spool: pulizia semplice non riuscita: ' . $e->getMessage(), SpoolFallbackPurger::LOG_CATEGORY);
             return;
@@ -138,6 +144,12 @@ class CronController extends Controller
     protected function fallbackMarkerFile(): string
     {
         return Yii::getAlias(SpoolFallbackPurger::MARKER_FILE);
+    }
+
+    /** Pulizia semplice (sostituibile nei test). */
+    protected function createFallbackPurger(): SpoolFallbackPurger
+    {
+        return new SpoolFallbackPurger();
     }
 
 

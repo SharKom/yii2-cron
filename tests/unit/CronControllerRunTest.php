@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace sharkom\cron\tests\unit;
 
 use Codeception\Test\Unit;
+use DateTimeImmutable;
 use sharkom\cron\commands\CronController;
+use sharkom\cron\services\SpoolFallbackPurger;
 use Yii;
 use yii\db\Query;
 use yii\db\Transaction;
@@ -112,5 +114,44 @@ final class CronControllerRunTest extends Unit
 
         $this->assertTrue($this->esiste($conclusa));
         $this->assertFileDoesNotExist($marcatore);
+    }
+
+    public function testRipiegoDaRunAlMassimo60Secondi(): void
+    {
+        $marcatore = sys_get_temp_dir() . '/spool-fallback-run-' . getmypid() . '-' . bin2hex(random_bytes(3)) . '.date';
+        Yii::$app->db->createCommand()->update('cron_job', ['active' => 0])->execute();
+        $purger = new class(Yii::$app->db) extends SpoolFallbackPurger {
+            public ?int $maxSecondi = null;
+
+            public function purgeOncePerDay(string $markerFile, int $days, int $maxSeconds = 0, ?DateTimeImmutable $now = null): ?array
+            {
+                $this->maxSecondi = $maxSeconds;
+                return null;
+            }
+        };
+        $comando = new class('cron', Yii::$app->getModule('cron'), ['marcatore' => $marcatore, 'purger' => $purger]) extends CronController {
+            public string $marcatore = '';
+            public ?SpoolFallbackPurger $purger = null;
+
+            protected function maintenanceAvailable(): bool
+            {
+                return false;
+            }
+
+            protected function fallbackMarkerFile(): string
+            {
+                return $this->marcatore;
+            }
+
+            protected function createFallbackPurger(): SpoolFallbackPurger
+            {
+                return $this->purger;
+            }
+        };
+
+        $comando->actionRun();
+
+        $this->assertSame(60, $purger->maxSecondi);
+        $this->assertSame(60, CronController::FALLBACK_MAX_SECONDS);
     }
 }
