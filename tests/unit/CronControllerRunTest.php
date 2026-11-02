@@ -47,4 +47,70 @@ final class CronControllerRunTest extends Unit
 
         $this->assertTrue((new Query())->from('commands_spool')->where(['id' => $id])->exists());
     }
+
+    private function controller(bool $classiDisponibili, string $marcatore): CronController
+    {
+        return new class('cron', Yii::$app->getModule('cron'), ['classi' => $classiDisponibili, 'marcatore' => $marcatore]) extends CronController {
+            public bool $classi = true;
+            public string $marcatore = '';
+
+            protected function maintenanceAvailable(): bool
+            {
+                return $this->classi;
+            }
+
+            protected function fallbackMarkerFile(): string
+            {
+                return $this->marcatore;
+            }
+        };
+    }
+
+    private function riga(int $completed): int
+    {
+        Yii::$app->db->createCommand()->insert('commands_spool', [
+            'command' => 'echo test',
+            'provenience' => 'test_retention',
+            'created_at' => '2020-01-01 00:00:00',
+            'completed' => $completed,
+        ])->execute();
+        return (int) Yii::$app->db->getLastInsertID();
+    }
+
+    private function esiste(int $id): bool
+    {
+        return (new Query())->from('commands_spool')->where(['id' => $id])->exists();
+    }
+
+    public function testSenzaClassiDiManutenzioneRunUsaIlRipiegoUnaVoltaAlGiorno(): void
+    {
+        $marcatore = sys_get_temp_dir() . '/spool-fallback-run-' . getmypid() . '-' . bin2hex(random_bytes(3)) . '.date';
+        Yii::$app->db->createCommand()->update('cron_job', ['active' => 0])->execute();
+        $conclusa = $this->riga(1);
+        $pendente = $this->riga(0);
+
+        try {
+            $this->controller(false, $marcatore)->actionRun();
+            $this->assertFalse($this->esiste($conclusa));
+            $this->assertTrue($this->esiste($pendente), 'mai le righe pendenti');
+
+            $seconda = $this->riga(1);
+            $this->controller(false, $marcatore)->actionRun();
+            $this->assertTrue($this->esiste($seconda), 'non piu\' di una volta al giorno');
+        } finally {
+            @unlink($marcatore);
+        }
+    }
+
+    public function testConClassiDiManutenzioneRunNonCancellaENonSegna(): void
+    {
+        $marcatore = sys_get_temp_dir() . '/spool-fallback-run-' . getmypid() . '-' . bin2hex(random_bytes(3)) . '.date';
+        Yii::$app->db->createCommand()->update('cron_job', ['active' => 0])->execute();
+        $conclusa = $this->riga(1);
+
+        $this->controller(true, $marcatore)->actionRun();
+
+        $this->assertTrue($this->esiste($conclusa));
+        $this->assertFileDoesNotExist($marcatore);
+    }
 }

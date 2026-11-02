@@ -11,6 +11,7 @@ namespace sharkom\cron\commands;
 use Cron\CronExpression;
 use http\Params;
 use sharkom\cron\models\CronJob;
+use sharkom\cron\services\SpoolFallbackPurger;
 use sharkom\devhelper\LogHelper;
 use yii\console\Controller;
 use yii\console\widgets\Table;
@@ -66,6 +67,7 @@ class CronController extends Controller
         //$this->unlock();
         // La pulizia di commands_spool non e' piu' qui (era una DELETE senza LIMIT ogni
         // minuto che cancellava anche le righe pendenti): vedi cron/maintenance/purge-spool.
+        // Solo senza le classi di manutenzione: purgeSpoolFallback() a fine run.
 
         foreach (CronJob::findRunnable() as $job) {
 
@@ -87,6 +89,55 @@ class CronController extends Controller
                 }
             }
         }
+
+        $this->purgeSpoolFallback();
+    }
+
+    /**
+     * Solo sui core senza le classi di manutenzione di yii2-dev-helper (NormaFlow), dove
+     * cron/maintenance/purge-spool puo' non essere programmato: pulizia semplice di
+     * commands_spool al massimo una volta al giorno, dopo aver accodato i job.
+     * Dove le classi ci sono (SoundOrgan) non fa nulla: ci pensa il job notturno.
+     */
+    private function purgeSpoolFallback(): void
+    {
+        if ($this->maintenanceAvailable()) {
+            return;
+        }
+        [$days, $warning] = SpoolFallbackPurger::resolveDays($this->module->params);
+        if ($days < 1) {
+            LogHelper::log('warning', "commands_spool: giorni di retention non validi ({$days}), pulizia saltata", SpoolFallbackPurger::LOG_CATEGORY);
+            return;
+        }
+        try {
+            $result = (new SpoolFallbackPurger())->purgeOncePerDay($this->fallbackMarkerFile(), $days, 300);
+        } catch (\Throwable $e) {
+            LogHelper::log('error', 'commands_spool: pulizia semplice non riuscita: ' . $e->getMessage(), SpoolFallbackPurger::LOG_CATEGORY);
+            return;
+        }
+        if ($result === null) {
+            return;
+        }
+        if ($warning !== null) {
+            LogHelper::log('warning', $warning, SpoolFallbackPurger::LOG_CATEGORY);
+        }
+        LogHelper::log(
+            'info',
+            "commands_spool: cancellate {$result['deleted']} righe precedenti a {$result['cutoff']} in {$result['batches']} blocchi (pulizia semplice giornaliera)",
+            SpoolFallbackPurger::LOG_CATEGORY
+        );
+    }
+
+    /** True se ci sono le classi di manutenzione di yii2-dev-helper (sostituibile nei test). */
+    protected function maintenanceAvailable(): bool
+    {
+        return SpoolFallbackPurger::maintenanceAvailable();
+    }
+
+    /** File marcatore della pulizia semplice giornaliera (sostituibile nei test). */
+    protected function fallbackMarkerFile(): string
+    {
+        return Yii::getAlias(SpoolFallbackPurger::MARKER_FILE);
     }
 
 

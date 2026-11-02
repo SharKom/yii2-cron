@@ -2,7 +2,9 @@
 
 namespace sharkom\cron\commands;
 
+use sharkom\cron\services\SpoolFallbackPurger;
 use sharkom\cron\services\SpoolRetentionService;
+use Yii;
 use sharkom\devhelper\LogHelper;
 use yii\console\Controller;
 use yii\console\ExitCode;
@@ -16,6 +18,11 @@ use yii\console\ExitCode;
  * oppure, deprecato, purge_log_interval (mesi, convertito in mesi x 30 con un avviso).
  * Programmato dalla migrazione m261102_160100 (dispatcher alle 2:45 oppure cron_job).
  * Alternativa manuale piu' semplice (senza file e senza ottimizzazione): cron/spooler/cleanup.
+ *
+ * Senza le classi di manutenzione di yii2-dev-helper (core NormaFlow) usa il ripiego
+ * SpoolFallbackPurger: stessa protezione delle righe pendenti, niente file ne'
+ * ottimizzazione. In quel caso segna anche la pulizia del giorno, cosi' cron/cron/run
+ * non la ripete.
  */
 class MaintenanceController extends Controller
 {
@@ -36,14 +43,18 @@ class MaintenanceController extends Controller
         if ($this->days !== null && $this->days !== '') {
             $days = (int) $this->days;
         } else {
-            [$days, $warning] = SpoolRetentionService::resolveDays($this->module->params);
+            [$days, $warning] = SpoolFallbackPurger::resolveDays($this->module->params);
             if ($warning !== null) {
-                LogHelper::log('warning', $warning, SpoolRetentionService::LOG_CATEGORY);
+                LogHelper::log('warning', $warning, SpoolFallbackPurger::LOG_CATEGORY);
             }
         }
         if ($days < 1) {
             $this->stderr("--days deve essere almeno 1\n");
             return ExitCode::USAGE;
+        }
+
+        if (!$this->maintenanceAvailable()) {
+            return $this->purgeWithFallback($days);
         }
 
         $report = $this->createService()->run($days, (bool) (int) $this->optimize, (int) $this->maxSeconds);
@@ -52,6 +63,40 @@ class MaintenanceController extends Controller
         // Ottimizzazione rinviata, sotto soglia, senza lock o senza spazio: esito 0, si
         // riprova la notte dopo. Solo un errore vero (es. ALTER fallito) da' 1.
         return $report->isError() ? ExitCode::UNSPECIFIED_ERROR : ExitCode::OK;
+    }
+
+    /**
+     * Pulizia semplice senza le classi di manutenzione: mai un fatal error per una
+     * dipendenza mancante.
+     */
+    private function purgeWithFallback(int $days): int
+    {
+        LogHelper::log(
+            'warning',
+            'Classi di manutenzione di yii2-dev-helper non disponibili: pulizia semplice di commands_spool'
+            . ((int) $this->optimize ? ' (--optimize ignorato)' : '') . ', senza ottimizzazione ne\' rimozione dei file di log',
+            SpoolFallbackPurger::LOG_CATEGORY
+        );
+        $result = (new SpoolFallbackPurger())->purge($days, (int) $this->maxSeconds);
+        SpoolFallbackPurger::markDone($this->fallbackMarkerFile());
+
+        $summary = "commands_spool: cancellate {$result['deleted']} righe precedenti a {$result['cutoff']} in {$result['batches']} blocchi (pulizia semplice)"
+            . ($result['stoppedByTime'] ? ', tempo massimo raggiunto: il resto alla prossima esecuzione' : '');
+        LogHelper::log('info', $summary, SpoolFallbackPurger::LOG_CATEGORY);
+        $this->stdout($summary . "\n");
+        return ExitCode::OK;
+    }
+
+    /** True se ci sono le classi di manutenzione di yii2-dev-helper (sostituibile nei test). */
+    protected function maintenanceAvailable(): bool
+    {
+        return SpoolFallbackPurger::maintenanceAvailable();
+    }
+
+    /** File marcatore della pulizia semplice giornaliera (sostituibile nei test). */
+    protected function fallbackMarkerFile(): string
+    {
+        return Yii::getAlias(SpoolFallbackPurger::MARKER_FILE);
     }
 
     /** Servizio di retention (sostituibile nei test). */

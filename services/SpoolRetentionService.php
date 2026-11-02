@@ -49,14 +49,7 @@ class SpoolRetentionService
      */
     public static function resolveDays(array $params): array
     {
-        if (isset($params['purge_spool_days'])) {
-            return [(int) $params['purge_spool_days'], null];
-        }
-        if (isset($params['purge_log_interval'])) {
-            $days = (int) $params['purge_log_interval'] * 30;
-            return [$days, "Parametro purge_log_interval deprecato: usare purge_spool_days (convertito in {$days} giorni)"];
-        }
-        return [self::DEFAULT_DAYS, null];
+        return SpoolFallbackPurger::resolveDays($params);
     }
 
     public function run(int $days, bool $optimize, int $maxSeconds, ?DateTimeImmutable $now = null): RetentionReport

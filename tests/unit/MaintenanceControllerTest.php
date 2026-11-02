@@ -128,4 +128,47 @@ final class MaintenanceControllerTest extends Unit
             $this->assertSame($atteso, $comando->actionPurgeSpool(), "stato {$stato}");
         }
     }
+
+    public function testSenzaClassiDiManutenzioneUsaIlRipiego(): void
+    {
+        $marcatore = sys_get_temp_dir() . '/spool-fallback-mc-' . getmypid() . '-' . bin2hex(random_bytes(3)) . '.date';
+        $vecchia = $this->riga(40);
+        Yii::$app->db->createCommand()->insert('commands_spool', [
+            'command' => 'echo test',
+            'provenience' => 'test_retention',
+            'created_at' => date('Y-m-d H:i:s', strtotime('-40 days')),
+            'completed' => 0,
+        ])->execute();
+        $pendente = (int) Yii::$app->db->getLastInsertID();
+
+        $comando = new class('maintenance', Yii::$app->getModule('cron'), ['marcatore' => $marcatore]) extends MaintenanceController {
+            public string $marcatore = '';
+
+            protected function maintenanceAvailable(): bool
+            {
+                return false;
+            }
+
+            protected function fallbackMarkerFile(): string
+            {
+                return $this->marcatore;
+            }
+
+            protected function createService(): SpoolRetentionService
+            {
+                throw new \LogicException('senza classi di manutenzione il servizio non va creato');
+            }
+        };
+        $comando->days = 14;
+        $comando->optimize = 1;
+
+        try {
+            $this->assertSame(ExitCode::OK, $comando->actionPurgeSpool());
+            $this->assertFalse($this->esiste($vecchia));
+            $this->assertTrue($this->esiste($pendente), 'mai le righe pendenti');
+            $this->assertSame(date('Y-m-d'), trim((string) file_get_contents($marcatore)), 'il comando segna la pulizia del giorno');
+        } finally {
+            @unlink($marcatore);
+        }
+    }
 }
