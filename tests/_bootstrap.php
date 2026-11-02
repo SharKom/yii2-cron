@@ -1,4 +1,12 @@
 <?php
+// Senza common/config/test-local.php (pacchetto fuori dal core, o core senza DB di test)
+// la suite si salta con un messaggio, senza fatal error.
+$testLocalFile = __DIR__ . '/../../../../common/config/test-local.php';
+if (!is_file($testLocalFile)) {
+    fwrite(STDERR, "Suite yii2-cron SALTATA: manca {$testLocalFile} (configurazione del DB di test soundorgan_test).\n");
+    exit(0);
+}
+
 defined('YII_DEBUG') or define('YII_DEBUG', true);
 defined('YII_ENV') or define('YII_ENV', 'test');
 
@@ -11,7 +19,7 @@ require_once __DIR__ . '/../../../../vendor/yiisoft/yii2/Yii.php';
 // Lanciare sempre sotto il lock comune:
 //   podman exec -u www-data -w /var/www/html/vendor/sharkom/yii2-cron/tests soundorgan-php \
 //     flock /tmp/soundorgan_test.lock /var/www/html/vendor/bin/codecept run unit
-$testLocal = require __DIR__ . '/../../../../common/config/test-local.php';
+$testLocal = require $testLocalFile;
 $dbConfig = $testLocal['components']['db'];
 // Regex esatta come common/tests/_db_guard.php: `soundorgan_test_x` non passa.
 if (!preg_match('/(^|;|:)dbname=soundorgan_test(;|$)/', (string)($dbConfig['dsn'] ?? ''))) {
