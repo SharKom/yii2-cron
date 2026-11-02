@@ -8,12 +8,15 @@ use Codeception\Test\Unit;
 use DateTimeImmutable;
 use sharkom\cron\commands\MaintenanceController;
 use sharkom\cron\services\SpoolRetentionService;
+use sharkom\cron\tests\SilenziaOutputConsole;
 use sharkom\devhelper\maintenance\OptimizeResult;
 use sharkom\devhelper\maintenance\RetentionReport;
 use Yii;
 use yii\console\ExitCode;
 use yii\db\Query;
 use yii\db\Transaction;
+
+require_once dirname(__DIR__) . '/_support/SilenziaOutputConsole.php';
 
 final class MaintenanceControllerTest extends Unit
 {
@@ -45,6 +48,13 @@ final class MaintenanceControllerTest extends Unit
         return (int) Yii::$app->db->getLastInsertID();
     }
 
+    private function comando($modulo): MaintenanceController
+    {
+        return new class('maintenance', $modulo) extends MaintenanceController {
+            use SilenziaOutputConsole;
+        };
+    }
+
     private function esiste(int $id): bool
     {
         return (new Query())->from('commands_spool')->where(['id' => $id])->exists();
@@ -57,7 +67,7 @@ final class MaintenanceControllerTest extends Unit
         $vecchia = $this->riga(40);
         $dentro = $this->riga(20);
 
-        $comando = new MaintenanceController('maintenance', $modulo);
+        $comando = $this->comando($modulo);
 
         $this->assertSame(ExitCode::OK, $comando->actionPurgeSpool());
         $this->assertFalse($this->esiste($vecchia));
@@ -70,7 +80,7 @@ final class MaintenanceControllerTest extends Unit
         $modulo->params = ['purge_spool_days' => 30];
         $riga = $this->riga(20);
 
-        $comando = new MaintenanceController('maintenance', $modulo);
+        $comando = $this->comando($modulo);
         $comando->days = 14;
 
         $this->assertSame(ExitCode::OK, $comando->actionPurgeSpool());
@@ -79,7 +89,7 @@ final class MaintenanceControllerTest extends Unit
 
     public function testGiorniNonValidi(): void
     {
-        $comando = new MaintenanceController('maintenance', Yii::$app->getModule('cron'));
+        $comando = $this->comando(Yii::$app->getModule('cron'));
         $comando->days = 0;
 
         $this->assertSame(ExitCode::USAGE, $comando->actionPurgeSpool());
@@ -101,6 +111,8 @@ final class MaintenanceControllerTest extends Unit
         ];
         foreach ($attesi as $stato => $atteso) {
             $comando = new class('maintenance', Yii::$app->getModule('cron'), ['stato' => $stato]) extends MaintenanceController {
+                use SilenziaOutputConsole;
+
                 public string $stato = '';
 
                 protected function createService(): SpoolRetentionService
@@ -142,6 +154,8 @@ final class MaintenanceControllerTest extends Unit
         $pendente = (int) Yii::$app->db->getLastInsertID();
 
         $comando = new class('maintenance', Yii::$app->getModule('cron'), ['marcatore' => $marcatore]) extends MaintenanceController {
+            use SilenziaOutputConsole;
+
             public string $marcatore = '';
 
             protected function maintenanceAvailable(): bool
@@ -170,5 +184,42 @@ final class MaintenanceControllerTest extends Unit
         } finally {
             @unlink($marcatore);
         }
+    }
+
+    /**
+     * Un drain del dispatcher interrompe il comando con InterruptedException: deve risalire
+     * fino al JobRunner (esecuzione "interrupted"), non diventare un errore con exit 1.
+     */
+    public function testInterruzioneDelDispatcherRisale(): void
+    {
+        if (!class_exists(\sharkom\jobDispatcher\services\InterruptedException::class)) {
+            $this->markTestSkipped('job dispatcher non installato');
+        }
+        $comando = new class('maintenance', Yii::$app->getModule('cron')) extends MaintenanceController {
+            use SilenziaOutputConsole;
+
+            protected function maintenanceAvailable(): bool
+            {
+                return true;
+            }
+
+            protected function createService(): SpoolRetentionService
+            {
+                return new class extends SpoolRetentionService {
+                    public function __construct()
+                    {
+                    }
+
+                    public function run(int $days, bool $optimize, int $maxSeconds, ?DateTimeImmutable $now = null): RetentionReport
+                    {
+                        throw new \sharkom\jobDispatcher\services\InterruptedException('SIGTERM durante il drain');
+                    }
+                };
+            }
+        };
+        $comando->days = 14;
+
+        $this->expectException(\sharkom\jobDispatcher\services\InterruptedException::class);
+        $comando->actionPurgeSpool();
     }
 }

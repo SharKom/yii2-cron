@@ -23,6 +23,14 @@ use yii\console\ExitCode;
  * SpoolFallbackPurger: stessa protezione delle righe pendenti, niente file ne'
  * ottimizzazione. In quel caso segna anche la pulizia del giorno, cosi' cron/cron/run
  * non la ripete.
+ *
+ * Exit code:
+ *  - 0 (OK): pulizia eseguita; anche con ottimizzazione rinviata, sotto soglia, senza
+ *    lock o senza spazio su disco (si riprova la notte dopo) e con la pulizia semplice;
+ *  - 1 (UNSPECIFIED_ERROR): errore vero dell'ottimizzazione (es. ALTER TABLE fallito);
+ *  - 64 (USAGE): --days minore di 1.
+ * Le eccezioni non vengono catturate: un'interruzione del dispatcher
+ * (InterruptedException durante il drain) risale fino al JobRunner.
  */
 class MaintenanceController extends Controller
 {
