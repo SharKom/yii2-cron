@@ -115,4 +115,29 @@ final class SpoolFallbackPurgerTest extends Unit
         $this->expectException(InvalidArgumentException::class);
         $this->purger()->purge(0);
     }
+
+    /** Righe medie di commands_spool ~74 KB: blocchi da 500 (~37 MB di binlog per transazione). */
+    private function inserisciConcluseVecchie(int $quante): void
+    {
+        $righe = [];
+        for ($i = 0; $i < $quante; $i++) {
+            $righe[] = ['echo test', 'test_retention', self::VECCHIA, 1];
+        }
+        Yii::$app->db->createCommand()
+            ->batchInsert('commands_spool', ['command', 'provenience', 'created_at', 'completed'], $righe)
+            ->execute();
+    }
+
+    public function testBlocchiDa500Righe(): void
+    {
+        $this->inserisciConcluseVecchie(501);
+        $purger = new SpoolFallbackPurger(Yii::$app->db);
+        $purger->pauseMs = 0;
+
+        $esito = $purger->purge(14, 0, new DateTimeImmutable(self::ADESSO));
+
+        $this->assertSame(500, $purger->batchSize);
+        $this->assertSame(501, $esito['deleted']);
+        $this->assertSame(2, $esito['batches']);
+    }
 }

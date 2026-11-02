@@ -29,6 +29,11 @@ class SpoolRetentionService
     public const TABLE = 'commands_spool';
     public const DEFAULT_DAYS = 14;
     public const LOG_CATEGORY = 'cron_retention';
+    /**
+     * Righe per blocco. Una riga di commands_spool pesa in media ~74 KB (logs, errors):
+     * con 5.000 righe sarebbero ~370 MB di binlog per transazione, con 500 ~37 MB.
+     */
+    public const BATCH_SIZE = 500;
 
     private Connection $db;
     private TableRetention $retention;
@@ -37,7 +42,11 @@ class SpoolRetentionService
     public function __construct(?Connection $db = null, ?TableRetention $retention = null, ?string $logDir = null)
     {
         $this->db = $db ?? Yii::$app->db;
-        $this->retention = $retention ?? new TableRetention($this->db, self::LOG_CATEGORY);
+        if ($retention === null) {
+            $retention = new TableRetention($this->db, self::LOG_CATEGORY);
+            $retention->purger->batchSize = self::BATCH_SIZE;
+        }
+        $this->retention = $retention;
         $this->logDir = $logDir ?? Yii::getAlias('@runtime/logs');
     }
 

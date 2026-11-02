@@ -15,7 +15,7 @@ use yii\db\Query;
  * yii2-dev-helper (sharkom\devhelper\maintenance: oggi il core NormaFlow, che usa il
  * branch normaflow di dev-helper).
  *
- * Stessa protezione di SpoolRetentionService: cancella a blocchi solo le righe concluse
+ * Stessa protezione di SpoolRetentionService: cancella a blocchi (500 righe) solo le righe concluse
  * (completed <> 0, quindi mai le pendenti/in esecuzione ne' quelle con completed NULL)
  * create prima della soglia o senza created_at. Niente ottimizzazione della tabella e
  * niente rimozione dei file di log.
@@ -32,8 +32,8 @@ class SpoolFallbackPurger
     public const MAINTENANCE_CLASS = '\\sharkom\\devhelper\\maintenance\\TableRetention';
     public const MARKER_FILE = '@runtime/cron-spool-purge-fallback.date';
 
-    /** Righe per blocco. */
-    public int $batchSize = 5000;
+    /** Righe per blocco: ~74 KB a riga, 500 righe ~37 MB di binlog per transazione. */
+    public int $batchSize = 500;
     /** Pausa tra i blocchi, in millisecondi. */
     public int $pauseMs = 100;
 
