@@ -140,4 +140,33 @@ final class SpoolFallbackPurgerTest extends Unit
         $this->assertSame(501, $esito['deleted']);
         $this->assertSame(2, $esito['batches']);
     }
+
+    public function testLaDeleteRipeteLaCondizione(): void
+    {
+        $conclusa = $this->riga(self::VECCHIA, 1);
+        $pendente = $this->riga(self::VECCHIA, 0);
+        // Simula una riga cambiata tra la SELECT e la DELETE: il blocco contiene anche
+        // l'id di una riga pendente, che la DELETE non deve toccare.
+        $purger = new class(Yii::$app->db, $pendente) extends SpoolFallbackPurger {
+            private int $intrusa;
+
+            public function __construct($db, int $intrusa)
+            {
+                parent::__construct($db);
+                $this->intrusa = $intrusa;
+            }
+
+            protected function selectBatch(array $condition): array
+            {
+                return array_merge(parent::selectBatch($condition), [$this->intrusa]);
+            }
+        };
+        $purger->pauseMs = 0;
+
+        $esito = $purger->purge(14, 0, new DateTimeImmutable(self::ADESSO));
+
+        $this->assertFalse($this->esiste($conclusa));
+        $this->assertTrue($this->esiste($pendente), 'la DELETE ripete completed <> 0');
+        $this->assertSame(1, $esito['deleted']);
+    }
 }

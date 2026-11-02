@@ -87,18 +87,14 @@ class SpoolFallbackPurger
                 $result['stoppedByTime'] = true;
                 break;
             }
-            $ids = (new Query())
-                ->select('id')
-                ->from(self::TABLE)
-                ->where($condition)
-                ->orderBy(['created_at' => SORT_ASC, 'id' => SORT_ASC])
-                ->limit($this->batchSize)
-                ->column($this->db);
+            $ids = $this->selectBatch($condition);
             if ($ids === []) {
                 break;
             }
+            // La DELETE ripete la condizione: una riga tornata pendente tra la SELECT e la
+            // DELETE non viene toccata.
             $result['deleted'] += $this->db->createCommand()
-                ->delete(self::TABLE, ['id' => array_map('intval', $ids)])
+                ->delete(self::TABLE, ['and', ['id' => array_map('intval', $ids)], $condition])
                 ->execute();
             $result['batches']++;
             if (count($ids) < $this->batchSize) {
@@ -110,6 +106,22 @@ class SpoolFallbackPurger
         }
 
         return $result;
+    }
+
+    /**
+     * Id del prossimo blocco: le righe piu' vecchie per prime.
+     *
+     * @return int[]|string[]
+     */
+    protected function selectBatch(array $condition): array
+    {
+        return (new Query())
+            ->select('id')
+            ->from(self::TABLE)
+            ->where($condition)
+            ->orderBy(['created_at' => SORT_ASC, 'id' => SORT_ASC])
+            ->limit($this->batchSize)
+            ->column($this->db);
     }
 
     /**
