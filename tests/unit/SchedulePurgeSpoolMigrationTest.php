@@ -18,6 +18,15 @@ require_once dirname(__DIR__, 2) . '/migrations/m261102_160100_schedule_purge_sp
  * Migrazione che programma cron/maintenance/purge-spool: tre rami
  * (dispatcher, cron_job di yii2-cron, nessuno), idempotenza e down.
  * Tutto in una transazione annullata in _after, su soundorgan_test.
+ *
+ * Il DB di test seminato da tests/setup-test-db.sh ha gia' il job (migrazione
+ * applicata), un DB nuovo no: _before toglie, dentro la transazione, il job con
+ * schedule ed eventi e il cron_job della migrazione, cosi' ogni test parte da un
+ * DB senza job qualunque sia il seed, e l'annullamento in _after rimette le righe
+ * seminate. Il caso «job gia' presente» (forma del seed: job e due schedule,
+ * nessun evento) ha un test suo, che lo crea esplicitamente. Meglio che
+ * riconoscere il job del seed: i controlli su dtstart, materializzazione e
+ * cron_job valgono solo per righe create dal test, e il seed puo' cambiare.
  */
 final class SchedulePurgeSpoolMigrationTest extends Unit
 {
@@ -31,6 +40,7 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
         $this->logLevel = Yii::$app->params['LogLevel'] ?? null;
         Yii::$app->params['LogLevel'] = 'error';
         $this->transazione = Yii::$app->db->beginTransaction();
+        $this->senzaJobGiaPresente(Yii::$app->db);
         ob_start();
     }
 
@@ -41,6 +51,30 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
             $this->transazione->rollBack();
         }
         Yii::$app->params['LogLevel'] = $this->logLevel;
+    }
+
+    /**
+     * Toglie job, schedule, eventi e cron_job della migrazione se ci sono gia'
+     * (DB di test seminato). Da chiamare dentro una transazione che poi si annulla.
+     * Cancellazioni esplicite, senza contare sulle cascate delle chiavi esterne.
+     */
+    private function senzaJobGiaPresente(Connection $db): void
+    {
+        if ($db->getTableSchema('system_jobs', true) !== null) {
+            $jobIds = (new Query())->select('id')->from('system_jobs')
+                ->where(['name' => (self::MIGRAZIONE)::JOB_NAME])->column($db);
+            if ($jobIds !== []) {
+                foreach (['scheduled_events', 'schedule_definitions'] as $tabella) {
+                    if ($db->getTableSchema($tabella, true) !== null) {
+                        $db->createCommand()->delete($tabella, ['system_job_id' => $jobIds])->execute();
+                    }
+                }
+                $db->createCommand()->delete('system_jobs', ['id' => $jobIds])->execute();
+            }
+        }
+        if ($db->getTableSchema('cron_job', true) !== null) {
+            $db->createCommand()->delete('cron_job', ['like', 'command', (self::MIGRAZIONE)::ROUTE])->execute();
+        }
     }
 
     private function migrazione(
@@ -173,11 +207,35 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
         $this->assertSame(1, (int) (new Query())->from('scheduled_events')->where(['system_job_id' => $job['id']])->count());
     }
 
+    public function testConJobGiaPresenteComeNelSeedNonDuplicaNeRiprogramma(): void
+    {
+        $this->richiedeDispatcher();
+        // Forma del DB seminato: job e due schedule, l'esecuzione unica gia'
+        // consumata (nessun evento). Rieseguire la migrazione riconosce il job e non
+        // crea ne' job, ne' schedule, ne' una nuova esecuzione unica.
+        $this->migrazione()->up();
+        $job = $this->job();
+        Yii::$app->db->createCommand()->delete('scheduled_events', ['system_job_id' => $job['id']])->execute();
+        $definizioniPrima = $this->definizioni((int) $job['id']);
+
+        $this->migrazione()->up();
+
+        $this->assertSame(1, (int) (new Query())->from('system_jobs')->where(['name' => (self::MIGRAZIONE)::JOB_NAME])->count());
+        $this->assertSame($job, $this->job());
+        $this->assertSame($definizioniPrima, $this->definizioni((int) $job['id']));
+        $this->assertSame(0, (int) (new Query())->from('scheduled_events')->where(['system_job_id' => $job['id']])->count());
+        $this->assertSame([], $this->cronJob());
+    }
+
     public function testConConnessioneDiversaDaQuellaDellAppNonMaterializza(): void
     {
         $this->richiedeDispatcher();
         // Stesso DB di test, ma un oggetto Connection diverso da Yii::$app->db
         // (come `migrate --db=<altro>`): il Materializer scriverebbe sul DB dell'app.
+        // La transazione del test ha gia' cancellato le righe del seed e le tiene
+        // bloccate: si annulla prima, e la pulizia si rifa' nella transazione
+        // dell'altra connessione (altrimenti attenderebbe i lock).
+        $this->transazione->rollBack();
         $altra = new Connection([
             'dsn' => Yii::$app->db->dsn,
             'username' => Yii::$app->db->username,
@@ -186,6 +244,8 @@ final class SchedulePurgeSpoolMigrationTest extends Unit
         ]);
         $transazione = $altra->beginTransaction();
         try {
+            $this->senzaJobGiaPresente($altra);
+            $this->assertNull($this->job($altra));
             $this->migrazione(true, true, $altra)->up();
 
             $job = $this->job($altra);
