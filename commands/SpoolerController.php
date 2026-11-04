@@ -9,6 +9,7 @@ use yii\console\Controller;
 use yii\console\ExitCode;
 use yii\db\Expression;
 use sharkom\cron\models\CommandsSpool;
+use sharkom\cron\services\LogRotator;
 use Yii;
 
 if (!defined('SIGTERM')) define('SIGTERM', 15);
@@ -37,6 +38,9 @@ class SpoolerController extends Controller
     // Tail (ultimi N byte da mantenere in RAM per DB/email)
     private $tailLimitBytes = 65536; // 64KB
 
+    /** @var LogRotator|null rotazione dei log dei comandi (parametri log_rotate_max_mb, log_rotate_keep) */
+    private $logRotator = null;
+
     public function init()
     {
         parent::init();
@@ -59,6 +63,18 @@ class SpoolerController extends Controller
             @touch($logFile);
             @chmod($logFile, 0664);
         }
+    }
+
+    /**
+     * Rotazione dei log dai parametri del modulo cron (default 50 MB, 5 copie).
+     */
+    private function logRotator(): LogRotator
+    {
+        if ($this->logRotator === null) {
+            $params = ($this->module !== null && is_array($this->module->params)) ? $this->module->params : [];
+            $this->logRotator = LogRotator::fromParams($params);
+        }
+        return $this->logRotator;
     }
 
     /**
@@ -392,6 +408,7 @@ class SpoolerController extends Controller
             $tailStdout = '';
             $tailStderr = '';
             $logFile = null;
+            $logWriteLock = null;
             $startTime = time();
             $loopBreakRequested = false; // <== flag per evitare break dentro finally
 
@@ -409,6 +426,12 @@ class SpoolerController extends Controller
                 $logFile = !empty($command['logs_file'])
                     ? $command['logs_file']
                     : Yii::getAlias("@runtime/logs/command_{$command['provenience']}_{$command['provenience_id']}.log");
+
+                // Oltre la soglia ruoto il log in .1.gz (mai eccezioni: in caso di problemi
+                // si continua sul file attuale), poi lock condiviso per tutta l'esecuzione:
+                // nessun altro processo lo ruota mentre il comando scrive.
+                $this->logRotator()->rotateIfNeeded($logFile);
+                $logWriteLock = $this->logRotator()->lockForWriting($logFile);
 
                 // Creo cartella/file se non esistono
                 $this->ensureLogFile($logFile);
@@ -591,8 +614,11 @@ class SpoolerController extends Controller
                 if (is_resource($logHandle)) {
                     fclose($logHandle);
                 }
+                if ($logWriteLock !== null) {
+                    $this->logRotator()->releaseWriteLock($logWriteLock);
+                }
                 $this->currentCommand = null;
-                unset($tailStdout, $tailStderr, $process, $pipes, $logHandle);
+                unset($tailStdout, $tailStderr, $process, $pipes, $logHandle, $logWriteLock);
                 $this->cleanupResources();
             }
 
