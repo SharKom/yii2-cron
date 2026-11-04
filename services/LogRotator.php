@@ -84,6 +84,7 @@ class LogRotator
         $lock = null;
         try {
             $lock = @fopen($file . '.lock', 'c');
+            self::alignOwnership($file . '.lock');
             if ($lock === false) {
                 $lock = null;
                 $this->warn("lock non disponibile per {$file}: rotazione saltata");
@@ -123,6 +124,7 @@ class LogRotator
                 @mkdir($dir, 0775, true);
             }
             $lock = @fopen($file . '.lock', 'c');
+            self::alignOwnership($file . '.lock');
             if ($lock === false) {
                 return null;
             }
@@ -202,8 +204,37 @@ class LogRotator
             return false;
         }
         @unlink($moved);
+        self::alignOwnership(self::rotatedPath($file, 1));
         return true;
     }
+
+    /**
+     * Chi ruota e scrive non e' sempre l'utente dell'applicazione: lo spooler gira come
+     * root nel container (`podman exec` senza -u, in SoundOrgan e in NormaFlow), mentre
+     * la cartella dei log e i log esistenti sono di www-data. Un file creato da root (il
+     * .lock, la copia compressa, il log nuovo) resterebbe di root e un processo www-data
+     * che scrive lo stesso log dopo una rotazione fallirebbe. Quando gira come root il
+     * file prende proprietario e gruppo della cartella che lo contiene. Mai eccezioni.
+     */
+    public static function alignOwnership(string $path): void
+    {
+        if (self::$ownershipChanger !== null) {
+            (self::$ownershipChanger)($path);
+            return;
+        }
+        if (!function_exists('posix_geteuid') || posix_geteuid() !== 0 || !file_exists($path)) {
+            return;
+        }
+        $dir = @stat(dirname($path));
+        if ($dir === false) {
+            return;
+        }
+        @chown($path, $dir['uid']);
+        @chgrp($path, $dir['gid']);
+    }
+
+    /** @var callable|null solo per i test: sostituisce il cambio di proprietario. */
+    public static $ownershipChanger = null;
 
     /** Rimette a posto il file spostato; se il percorso e' stato ricreato lo lascia accanto. */
     private function restore(string $moved, string $file): void

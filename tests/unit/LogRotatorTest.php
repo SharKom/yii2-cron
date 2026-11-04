@@ -28,6 +28,7 @@ final class LogRotatorTest extends Unit
 
     protected function _after(): void
     {
+        LogRotator::$ownershipChanger = null;
         @chmod($this->cartella, 0777);
         FileHelper::removeDirectory($this->cartella);
     }
@@ -46,6 +47,33 @@ final class LogRotatorTest extends Unit
     {
         $this->assertFileExists($gz);
         return gzdecode((string) file_get_contents($gz));
+    }
+
+    public function testIFileNatiDaRootPrendonoIlProprietarioDellaCartella(): void
+    {
+        // Lo spooler gira come root nel container: .lock e copia compressa vanno
+        // riallineati, altrimenti un processo www-data non scriverebbe piu' il log.
+        $toccati = [];
+        LogRotator::$ownershipChanger = function (string $path) use (&$toccati) {
+            $toccati[] = basename($path);
+        };
+        $this->scrivi($this->contenuto(self::SOGLIA + 10, 'a'));
+
+        $this->assertTrue((new LogRotator(self::SOGLIA, 5))->rotateIfNeeded($this->log));
+
+        $this->assertContains('command_cron_job_5.log.lock', $toccati);
+        $this->assertContains('command_cron_job_5.log.1.gz', $toccati);
+    }
+
+    public function testSenzaRootIlProprietarioNonSiTocca(): void
+    {
+        // Da www-data (come girano i test) alignOwnership non deve fare niente ne' fallire.
+        $this->scrivi('x');
+        $prima = fileowner($this->log);
+
+        LogRotator::alignOwnership($this->log);
+
+        $this->assertSame($prima, fileowner($this->log));
     }
 
     public function testSottoSogliaNessunaRotazione(): void

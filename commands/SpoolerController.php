@@ -63,6 +63,8 @@ class SpoolerController extends Controller
             @touch($logFile);
             @chmod($logFile, 0664);
         }
+        // Lo spooler gira come root: il log nuovo prende il proprietario della cartella.
+        \sharkom\cron\services\LogRotator::alignOwnership($logFile);
     }
 
     /**
