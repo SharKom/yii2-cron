@@ -61,10 +61,12 @@ final class SpoolRetentionServiceTest extends Unit
         return (int) Yii::$app->db->getLastInsertID();
     }
 
-    private function file(string $cartella, string $nome): string
+    /** File di log con mtime $modificato (default: vecchio, fuori dalle 24 ore). */
+    private function file(string $cartella, string $nome, string $modificato = self::VECCHIA): string
     {
         $percorso = $cartella . '/' . $nome;
         file_put_contents($percorso, "log\n");
+        touch($percorso, strtotime($modificato));
         return $percorso;
     }
 
@@ -196,5 +198,64 @@ final class SpoolRetentionServiceTest extends Unit
         $this->assertTrue($this->esiste($vecchiaPendente));
         $this->assertTrue($this->esiste($senzaDataPendente));
         $this->assertStringContainsString('righe pendenti precedenti alla soglia 2 (non cancellate)', $servizio->summary($report));
+    }
+
+    public function testStessoFileScrittoAttraversoUnSymlinkNonSiCancella(): void
+    {
+        // Come sul dev: /var/www/html/console/runtime -> /var/soundorgan/runtime/console.
+        $alias = $this->base . '/alias';
+        symlink($this->cartellaLog, $alias);
+        $condiviso = $this->file($this->cartellaLog, 'command_cron_job_5.log');
+
+        $this->riga(self::VECCHIA, 1, $condiviso);
+        $this->riga(self::RECENTE, 1, $alias . '/command_cron_job_5.log');
+
+        $report = $this->servizio()->run(14, false, 60, new DateTimeImmutable(self::ADESSO));
+
+        $this->assertFileExists($condiviso, 'stesso realpath di un logs_file ancora usato');
+        $this->assertSame(0, $report->filesRemoved);
+    }
+
+    public function testFileModificatoNelleUltime24OreNonSiTocca(): void
+    {
+        $recente = $this->file($this->cartellaLog, 'recente.log', '2026-11-02 01:00:00');
+        $vecchio = $this->file($this->cartellaLog, 'vecchio.log', '2026-11-01 02:00:00');
+        $this->riga(self::VECCHIA, 1, $recente);
+        $this->riga(self::VECCHIA, 1, $vecchio);
+
+        $report = $this->servizio()->run(14, false, 60, new DateTimeImmutable(self::ADESSO));
+
+        $this->assertFileExists($recente, 'modificato 2 ore prima');
+        $this->assertFileDoesNotExist($vecchio, 'modificato 25 ore prima');
+        $this->assertSame(1, $report->filesRemoved);
+    }
+
+    public function testCopieRuotateNonSonoOrfani(): void
+    {
+        $base = $this->file($this->cartellaLog, 'ruotato.log');
+        $copia1 = $this->file($this->cartellaLog, 'ruotato.log.1.gz');
+        $copia5 = $this->file($this->cartellaLog, 'ruotato.log.5.gz');
+        $this->riga(self::VECCHIA, 1, $base);
+        $this->riga(self::VECCHIA, 1, $copia1);
+        $this->riga(self::VECCHIA, 1, $copia5);
+
+        $report = $this->servizio()->run(14, false, 60, new DateTimeImmutable(self::ADESSO));
+
+        $this->assertFileDoesNotExist($base, 'il log orfano si cancella');
+        $this->assertFileExists($copia1);
+        $this->assertFileExists($copia5);
+        $this->assertSame(1, $report->filesRemoved);
+    }
+
+    public function testOrfanoVecchioCancellatoSenzaFileDiAppoggio(): void
+    {
+        $orfano = $this->file($this->cartellaLog, 'orfano.log');
+        $this->riga(self::VECCHIA, 1, $orfano);
+
+        $report = $this->servizio()->run(14, false, 60, new DateTimeImmutable(self::ADESSO));
+
+        $this->assertFileDoesNotExist($orfano);
+        $this->assertSame([], glob($this->cartellaLog . '/*.purge.*'), 'nessun .purge.<pid> rimasto');
+        $this->assertSame(1, $report->filesRemoved);
     }
 }

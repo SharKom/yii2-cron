@@ -32,6 +32,15 @@ ChangeLog 2/Nov/2026
 5. Without the maintenance classes of sharkom/yii2-dev-helper (sharkom\devhelper\maintenance, e.g. NormaFlow) the command falls back
    to a simple purge (same protection, blocks of 500, no file removal, no optimization) and cron/cron/run runs it at most once a day
 
+ChangeLog 4/Nov/2026
+1. The spooler rotates the command log before opening it: above log_rotate_max_mb (module param, MB, default 50; 0 disables)
+   the file is moved and gzip-compressed to <file>.1.gz, older copies shift up to <file>.<log_rotate_keep>.gz (default 5)
+   and the oldest is deleted (services/LogRotator.php, lock file <file>.lock; on errors the command keeps writing)
+2. Migration migrations/m261104_120000_cron_job_log_in_runtime.php: cron_job with logfile in /var/log/ get an empty
+   logfile (@runtime/logs/command_cron_job_<id>.log); down does not restore (up prints the UPDATEs to restore by hand)
+3. purge-spool: files still used are compared by realpath, files modified in the last 24 hours are kept, removal is
+   rename -> recheck -> unlink (or rename back), rotated copies *.N.gz are never removed
+
 Note: the full purge (log files and online table rebuild) needs the classes sharkom\devhelper\maintenance of
 sharkom/yii2-dev-helper (suggested in composer.json, not required); without them the simple purge is used.
 

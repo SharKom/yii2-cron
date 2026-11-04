@@ -20,9 +20,16 @@ use yii\db\Query;
  *
  * File di log: logs_file e' condiviso tra le esecuzioni dello stesso job
  * (es. command_cron_job_22.log, /var/log/offers2mandates.log). Un file si rimuove solo
- * se sta dentro la cartella dei log attesa (@runtime/logs, la stessa dello spooler,
- * confronto sui realpath: niente `..` ne' symlink verso fuori) e se nessuna riga
- * rimasta in tabella lo usa ancora.
+ * se:
+ *  - sta dentro la cartella dei log attesa (@runtime/logs, la stessa dello spooler,
+ *    confronto sui realpath: niente `..` ne' symlink verso fuori);
+ *  - nessuna riga rimasta in tabella lo usa ancora, confrontando i realpath dei
+ *    logs_file distinti e non il testo (lo stesso file e' scritto sia come
+ *    /var/www/html/console/runtime/logs/... sia attraverso il symlink risolto);
+ *  - non e' stato modificato nelle ultime 24 ore (RECENT_SECONDS);
+ *  - non e' una copia ruotata `*.N.gz` dello spooler (LogRotator): quelle non sono orfani.
+ * Cancellazione: rename in `<file>.purge.<pid>`, ricontrollo (ancora usato o modificato
+ * di recente) e poi unlink, oppure rename indietro.
  */
 class SpoolRetentionService
 {
@@ -34,6 +41,8 @@ class SpoolRetentionService
      * con 5.000 righe sarebbero ~370 MB di binlog per transazione, con 500 ~37 MB.
      */
     public const BATCH_SIZE = 500;
+    /** Un file di log modificato da meno di cosi' (secondi) non si tocca. */
+    public const RECENT_SECONDS = 86400;
 
     /** Righe pendenti precedenti alla soglia dell'ultima run(): contate, mai cancellate. */
     public int $pendingOld = 0;
@@ -69,7 +78,8 @@ class SpoolRetentionService
         if ($days < 1) {
             throw new InvalidArgumentException("Giorni di retention non validi: {$days}");
         }
-        $cutoff = ($now ?? new DateTimeImmutable())->modify("-{$days} days")->format('Y-m-d H:i:s');
+        $now = $now ?? new DateTimeImmutable();
+        $cutoff = $now->modify("-{$days} days")->format('Y-m-d H:i:s');
 
         $candidates = [];
         $report = $this->retention->run(
@@ -83,13 +93,13 @@ class SpoolRetentionService
             function (array $rows) use (&$candidates): void {
                 foreach ($rows as $row) {
                     $file = (string) ($row['logs_file'] ?? '');
-                    if ($file !== '' && $this->isInsideLogDir($file)) {
+                    if ($file !== '' && !LogRotator::isRotatedCopy($file) && $this->isInsideLogDir($file)) {
                         $candidates[$file] = true;
                     }
                 }
             }
         );
-        $report->filesRemoved = $this->removeUnreferencedFiles(array_keys($candidates));
+        $report->filesRemoved = $this->removeUnreferencedFiles(array_keys($candidates), $now->getTimestamp());
         $this->pendingOld = SpoolFallbackPurger::countPendingOld($this->db, $cutoff);
 
         LogHelper::log($report->isError() ? 'error' : 'info', $this->summary($report), self::LOG_CATEGORY);
@@ -117,25 +127,102 @@ class SpoolRetentionService
     /**
      * @param string[] $files percorsi come scritti in logs_file
      */
-    private function removeUnreferencedFiles(array $files): int
+    private function removeUnreferencedFiles(array $files, int $now): int
     {
+        // realpath => percorso come scritto (per i messaggi)
+        $byReal = [];
+        foreach ($files as $file) {
+            $real = realpath($file);
+            if ($real !== false && !LogRotator::isRotatedCopy($real) && $this->isInsideLogDir($real)) {
+                $byReal[$real] = $file;
+            }
+        }
+        if ($byReal === []) {
+            return 0;
+        }
+
         $removed = 0;
-        foreach (array_chunk($files, 500) as $chunk) {
-            $stillUsed = (new Query())
-                ->select('logs_file')->distinct()
-                ->from(self::TABLE)
-                ->where(['logs_file' => $chunk])
-                ->column($this->db);
-            foreach (array_diff($chunk, $stillUsed) as $file) {
-                // Ricontrollo al momento della rimozione e cancello il percorso risolto.
-                $real = realpath($file);
-                if ($real !== false && $this->isInsideLogDir($real) && @unlink($real)) {
-                    $removed++;
-                } else {
-                    LogHelper::log('warning', "commands_spool: file di log non rimosso: {$file}", self::LOG_CATEGORY);
-                }
+        $used = $this->usedRealPaths();
+        foreach ($byReal as $real => $file) {
+            if (isset($used[$real]) || $this->isRecent($real, $now)) {
+                continue;
+            }
+            if ($this->purgeFile($real, $now)) {
+                $removed++;
+            } else {
+                LogHelper::log('warning', "commands_spool: file di log non rimosso: {$file}", self::LOG_CATEGORY);
             }
         }
         return $removed;
+    }
+
+    /**
+     * Rename in `<file>.purge.<pid>`, ricontrollo e unlink; se nel frattempo il file e'
+     * tornato in uso (o e' stato modificato) lo rimette al suo posto.
+     */
+    private function purgeFile(string $real, int $now): bool
+    {
+        $parked = $real . '.purge.' . getmypid();
+        if (!@rename($real, $parked)) {
+            return false;
+        }
+        clearstatcache(true, $parked);
+        $used = $this->usedRealPaths();
+        if (!isset($used[$real]) && !$this->isRecent($parked, $now)) {
+            if (@unlink($parked)) {
+                return true;
+            }
+        }
+        if (file_exists($real)) {
+            // Ricreato nel frattempo (es. dallo spooler): la copia precedente resta accanto.
+            LogHelper::log('warning', "commands_spool: {$real} ricreato durante la pulizia, il contenuto precedente resta in {$parked}", self::LOG_CATEGORY);
+        } elseif (!@rename($parked, $real)) {
+            LogHelper::log('warning', "commands_spool: impossibile rimettere a posto {$parked}", self::LOG_CATEGORY);
+        }
+        return false;
+    }
+
+    /** True se il file e' stato modificato nelle ultime RECENT_SECONDS rispetto a $now. */
+    private function isRecent(string $path, int $now): bool
+    {
+        clearstatcache(true, $path);
+        $mtime = @filemtime($path);
+        // Senza mtime leggibile si sta dalla parte della prudenza.
+        return $mtime === false || $mtime > $now - self::RECENT_SECONDS;
+    }
+
+    /**
+     * Insieme (chiavi) dei percorsi risolti dei logs_file distinti rimasti in tabella.
+     * Un file che non esiste piu' (es. appena rinominato in .purge.<pid>) si risolve con
+     * il realpath della cartella piu' il nome.
+     *
+     * @return array<string, true>
+     */
+    private function usedRealPaths(): array
+    {
+        $query = (new Query())
+            ->select('logs_file')->distinct()
+            ->from(self::TABLE)
+            ->where(['and', ['not', ['logs_file' => null]], ['<>', 'logs_file', '']]);
+        $used = [];
+        foreach ($query->batch(self::BATCH_SIZE, $this->db) as $rows) {
+            foreach ($rows as $row) {
+                $resolved = self::resolvePath((string) $row['logs_file']);
+                if ($resolved !== null) {
+                    $used[$resolved] = true;
+                }
+            }
+        }
+        return $used;
+    }
+
+    private static function resolvePath(string $path): ?string
+    {
+        $real = realpath($path);
+        if ($real !== false) {
+            return $real;
+        }
+        $dir = realpath(dirname($path));
+        return $dir === false ? null : rtrim($dir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . basename($path);
     }
 }
