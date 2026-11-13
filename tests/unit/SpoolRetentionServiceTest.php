@@ -37,6 +37,9 @@ final class SpoolRetentionServiceTest extends Unit
         mkdir($this->cartellaLog, 0777, true);
         mkdir($this->cartellaFuori, 0777, true);
         $this->transazione = Yii::$app->db->beginTransaction();
+        // commands_spool del DB di test può avere righe d'altri (collaudi, altri test): i conteggi
+        // del purger valgono solo con le righe del test. Il rollBack del _after le rimette.
+        Yii::$app->db->createCommand()->delete('commands_spool')->execute();
     }
 
     protected function _after(): void

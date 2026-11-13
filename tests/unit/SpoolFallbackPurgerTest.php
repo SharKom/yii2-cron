@@ -29,6 +29,9 @@ final class SpoolFallbackPurgerTest extends Unit
     {
         $this->marcatore = sys_get_temp_dir() . '/spool-fallback-' . getmypid() . '-' . bin2hex(random_bytes(3)) . '.date';
         $this->transazione = Yii::$app->db->beginTransaction();
+        // commands_spool del DB di test può avere righe d'altri (collaudi, altri test): i conteggi
+        // del purger valgono solo con le righe del test. Il rollBack del _after le rimette.
+        Yii::$app->db->createCommand()->delete('commands_spool')->execute();
     }
 
     protected function _after(): void
