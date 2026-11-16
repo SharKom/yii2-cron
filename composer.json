@@ -19,7 +19,7 @@
   "require": {
     "yiisoft/yii2": "~2.0.0",
     "symfony/process": "^5.0|^6.0|^7.0",
-    "dragonmantank/cron-expression": "^1.2",
+    "dragonmantank/cron-expression": "^3.4",
     "kartik-v/yii2-grid": "@dev",
     "sharkom/yii2-cronjob-widget": "^1"
   },

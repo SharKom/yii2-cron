@@ -26,7 +26,7 @@ class CronScheduleHelper
 
         if ($schedule !== null) {
             try {
-                $cron = CronExpression::factory($schedule);
+                $cron = new CronExpression($schedule);
                 $nextRun = DateTimeImmutable::createFromMutable($cron->getNextRunDate());
                 $prevRun = DateTimeImmutable::createFromMutable($cron->getPreviousRunDate());
             } catch (\Throwable $e) {

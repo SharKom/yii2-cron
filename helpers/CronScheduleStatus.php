@@ -30,7 +30,7 @@ final class CronScheduleStatus
             return null;
         }
         try {
-            $cron = CronExpression::factory($this->schedule);
+            $cron = new CronExpression($this->schedule);
             $fromMutable = DateTime::createFromImmutable($from);
             return DateTimeImmutable::createFromMutable($cron->getNextRunDate($fromMutable, $nth, $allowCurrent));
         } catch (\Throwable $e) {
@@ -44,7 +44,7 @@ final class CronScheduleStatus
             return null;
         }
         try {
-            $cron = CronExpression::factory($this->schedule);
+            $cron = new CronExpression($this->schedule);
             return DateTimeImmutable::createFromMutable($cron->getNextRunDate('now', $nth));
         } catch (\Throwable $e) {
             return null;

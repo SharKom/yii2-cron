@@ -79,7 +79,7 @@ class CronController extends Controller
 
             //LogHelper::log('info', $job);
 
-            if (CronExpression::factory($job->schedule)->isDue()) {
+            if ((new CronExpression($job->schedule))->isDue()) {
                 //echo "[" . date('Y-m-d H:i:s') . "] ". Console::ansiFormat("[info]", [Console::FG_GREEN]) . " - ".$job->id." - ".$job->name." - isDue". PHP_EOL;
                 //$this->run('/cron/job/run', [$job->id]);
                 $conn = Yii::$app->db;
