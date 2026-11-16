@@ -58,7 +58,7 @@ class CronController extends Controller
                     $job->schedule,
                     $job->command,
                     $job->logfile,
-                    $job->max_execution_time,
+                    $job->execution_time,
                     $job->active ? true : false,
                 ];
             })
