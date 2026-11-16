@@ -121,7 +121,9 @@ class SpoolerController extends Controller
         $buffer .= $chunk;
         $len = strlen($buffer);
         if ($len > $maxBytes) {
-            $buffer = substr($buffer, $len - $maxBytes);
+            // mb_strcut parte dall'inizio di un carattere: substr poteva tagliarne
+            // uno UTF-8 a meta' e il salvataggio dei log falliva (errore 1366).
+            $buffer = mb_strcut($buffer, $len - $maxBytes, $maxBytes, 'UTF-8');
         }
     }
 
@@ -357,7 +359,17 @@ class SpoolerController extends Controller
                 $spool->completed = -1;
                 $prefix = "Informazioni (tail) recuperate dai log dopo la chiusura imprevista del processo:\n\n---------------------------------\n";
                 $spool->logs = $prefix . ($logs !== null ? $logs : '[Nessuna coda trovata]');
-                $spool->save(false);
+                try {
+                    $spool->save(false);
+                } catch (\Throwable $e) {
+                    // Un job che non riesce a salvare i log non deve bloccare la coda:
+                    // lo spooler ripartirebbe sempre da questo job.
+                    LogHelper::log('error', "Log del job {$interrupted['id']} non salvabili: " . $e->getMessage());
+                    CommandsSpool::updateAll(
+                        ['result' => 'fatal', 'completed' => -1, 'logs' => '[log non salvabili, vedere logs_file]'],
+                        ['id' => $interrupted['id']]
+                    );
+                }
             }
         }
 
