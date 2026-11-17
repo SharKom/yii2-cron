@@ -676,7 +676,7 @@ class SpoolerController extends Controller
         return ExitCode::OK;
     }
 
-    private function updateCronJob(array $command, int $seconds = null, $exit_code = null)
+    private function updateCronJob(array $command, ?int $seconds = null, $exit_code = null)
     {
         if ($command['provenience'] !== 'cron_job' || empty($command['provenience_id'])) {
             return;
