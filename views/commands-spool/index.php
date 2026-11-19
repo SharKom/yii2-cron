@@ -5,7 +5,7 @@
 /* @var $dataProvider yii\data\ActiveDataProvider */
 
 use yii\helpers\Html;
-use kartik\export\ExportMenu;
+use sharkom\devhelper\export\ExportMenu;
 use kartik\grid\GridView;
 use yii\helpers\Console;
 use sharkom\cron\assets\LogViewerAsset;
